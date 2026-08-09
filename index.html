@@ -71,6 +71,7 @@ const Loader2 = (p) => <Ic {...p}><circle cx="12" cy="12" r="9" opacity="0.25" /
 const RefreshCw = (p) => <Ic {...p}><path d="M21 12a9 9 0 1 1-3-6.7" /><polyline points="21 3 21 9 15 9" /></Ic>;
 const Sparkles = (p) => <Ic {...p}><path d="M12 3l1.2 4.8L18 9l-4.8 1.2L12 15l-1.2-4.8L6 9l4.8-1.2L12 3z" /><path d="M19 14l.6 2.4L22 17l-2.4.6L19 20l-.6-2.4L16 17l2.4-.6L19 14z" /></Ic>;
 const Info = (p) => <Ic {...p}><circle cx="12" cy="12" r="9" /><line x1="12" y1="11" x2="12" y2="16" /><circle cx="12" cy="7.5" r="0.6" fill={p.color || 'currentColor'} stroke="none" /></Ic>;
+const TrendingUp = (p) => <Ic {...p}><polyline points="3 17 9 11 13 15 21 6" /><polyline points="14 6 21 6 21 13" /></Ic>;
 
 /* =========================================================================
    SUPABASE STORAGE — get/set/delete/list, backed by table `pbi_data`
@@ -351,6 +352,7 @@ const TABS = [
   { id: 'occupancy', label: 'Log Occupancy', icon: CircleDot },
   { id: 'heatmap', label: 'Heatmap', icon: Grid3x3 },
   { id: 'rankings', label: 'Rankings', icon: Trophy },
+  { id: 'insights', label: 'Insights', icon: TrendingUp },
   { id: 'calendar', label: 'Calendar', icon: CalendarIcon },
 ];
 
@@ -491,6 +493,7 @@ function App() {
         {tab === 'occupancy' && <OccupancyTab ctx={ctx} />}
         {tab === 'heatmap' && <HeatmapTab ctx={ctx} />}
         {tab === 'rankings' && <RankingsTab ctx={ctx} />}
+        {tab === 'insights' && <InsightsTab ctx={ctx} />}
         {tab === 'calendar' && <CalendarTab ctx={ctx} />}
       </main>
     </div>
@@ -1537,8 +1540,11 @@ function WeekEntry({ ctx, venue, court, anchor, setAnchor }) {
   const monday = startOfWeekMonday(anchor);
   const days = weekDates(monday);
   const { open, close } = courtHours(court, venue);
-  const openHour = Math.floor(timeToMin(open) / 60);
-  const closeHourExclusive = Math.max(openHour + 1, Math.ceil(timeToMin(close) / 60));
+  const openMin = timeToMin(open);
+  let closeMin = timeToMin(close);
+  if (closeMin <= openMin) closeMin += 24 * 60; // "12:00 AM" close = midnight = end of day, not hour 0
+  const openHour = Math.floor(openMin / 60);
+  const closeHourExclusive = Math.min(24, Math.ceil(closeMin / 60));
   const hourRows = [];
   for (let h = openHour; h < closeHourExclusive; h++) hourRows.push(h);
 
@@ -1547,28 +1553,9 @@ function WeekEntry({ ctx, venue, court, anchor, setAnchor }) {
     return (occData[mKey]?.[courtId]?.[dateStr]) || defaultHourStates(...Object.values(courtHours(court, venue)));
   }
 
-  function toggleCell(dateStr, hour) {
-    const mKey = monthKeyOf(dateStr);
-    const existing = hoursFor(dateStr);
-    const next = existing.map((x, i) => {
-      if (i !== hour) return x;
-      const nextState = x.state === 'occupied' ? 'available' : 'occupied';
-      let price = x.price, category = x.category;
-      if (nextState === 'occupied') {
-        const rule = matchPricingRule(master.pricing, courtId, dateStr, hour);
-        price = rule ? rule.price : x.price;
-        category = rule ? rule.category : x.category;
-      }
-      return { state: nextState, price, category };
-    });
-    const monthData = { ...(occData[mKey] || {}) };
-    monthData[courtId] = { ...(monthData[courtId] || {}), [dateStr]: next };
-    persistOccMonth(mKey, monthData);
-  }
-
   // Backfill any occupied hour in the visible week that's missing a price
   // now that a matching rule exists — hours that already have a price are
-  // left untouched.
+  // left untouched. This is a data correction, not an occupancy edit.
   useEffect(() => {
     const byMonth = {};
     days.forEach(d => {
@@ -1591,7 +1578,8 @@ function WeekEntry({ ctx, venue, court, anchor, setAnchor }) {
     Object.entries(byMonth).forEach(([mKey, monthData]) => persistOccMonth(mKey, monthData));
   }, [courtId, monday, master.pricing, occData]); // eslint-disable-line
 
-  // week-level stats
+  // week-level stats — always derived live from the same records the Day
+  // view edits, so this updates automatically as bookings change.
   let avail = 0, occ = 0, rev = 0;
   days.forEach(d => {
     hoursFor(d).forEach((h, i) => {
@@ -1611,9 +1599,14 @@ function WeekEntry({ ctx, venue, court, anchor, setAnchor }) {
         <button style={styles.ghostBtn} onClick={() => setAnchor(todayStr())}>This week</button>
       </div>
 
-      <div style={styles.legendRow}>
-        <LegendDot color="#BFE0CC" label="Available — tap to book" />
-        <LegendDot color="var(--court)" label="Occupied — tap to free up" />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+        <div style={styles.legendRow}>
+          <LegendDot color="#BFE0CC" label="Available" />
+          <LegendDot color="var(--court)" label="Occupied" />
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+          Read-only summary — click into a day on the <b>Day</b> tab above to log or change bookings.
+        </div>
       </div>
 
       <Card>
@@ -1633,15 +1626,15 @@ function WeekEntry({ ctx, venue, court, anchor, setAnchor }) {
                   const cell = hoursFor(d)[h];
                   const isOccupied = cell.state === 'occupied';
                   return (
-                    <button key={d + h} onClick={() => toggleCell(d, h)}
+                    <div key={d + h}
                       title={`${DAY_NAMES[dateToDow(d)]} ${fmtShortDate(d)}, ${hourLabel(h)}${isOccupied && cell.price != null ? ' — ' + fmtMoney(cell.price) : ''}`}
                       style={{
-                        ...styles.weekCell,
+                        ...styles.weekCell, cursor: 'default',
                         background: isOccupied ? 'var(--court)' : '#BFE0CC',
                         color: isOccupied ? '#fff' : 'var(--ink)',
                       }}>
                       {isOccupied && cell.price != null ? <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)' }}>{Math.round(cell.price / 100) / 10}k</span> : null}
-                    </button>
+                    </div>
                   );
                 })}
               </React.Fragment>
@@ -1822,6 +1815,243 @@ function RankList({ rows, metric, fmt }) {
         </div>
       ))}
     </div>
+  );
+}
+
+/* =========================================================================
+   INSIGHTS TAB — peak/off-peak mix, Poya & holiday impact, trends, market share
+========================================================================= */
+
+function InsightsTab({ ctx }) {
+  const { master, flatRows, aggregate } = ctx;
+  const [province, setProvince] = useState('');
+  const [district, setDistrict] = useState('');
+  const [city, setCity] = useState('');
+
+  const districts = province ? PROVINCE_DISTRICTS[province] : [...new Set(master.venues.map(v => v.district))];
+  const cities = [...new Set(master.venues.filter(v => (!province || v.province === province) && (!district || v.district === district)).map(v => v.city))];
+
+  let rows = flatRows;
+  if (province) rows = rows.filter(r => r.province === province);
+  if (district) rows = rows.filter(r => r.district === district);
+  if (city) rows = rows.filter(r => r.city === city);
+
+  if (master.venues.length === 0 || flatRows.length === 0) {
+    return (
+      <TabWrap title="Insights" eyebrow="Peak mix · special days · trends · market share">
+        <EmptyState icon={TrendingUp} title="Not enough data yet" body="Log some occupancy first — these views need real booking history to say anything useful." />
+      </TabWrap>
+    );
+  }
+
+  return (
+    <TabWrap title="Insights" eyebrow="Peak mix · special days · trends · market share">
+      <div style={styles.filterRow}>
+        <Select value={province} onChange={v => { setProvince(v); setDistrict(''); setCity(''); }} placeholder="All provinces" options={PROVINCES} />
+        <Select value={district} onChange={v => { setDistrict(v); setCity(''); }} placeholder="All districts" options={districts} />
+        <Select value={city} onChange={setCity} placeholder="All cities" options={cities} />
+      </div>
+
+      <PeakMixCard master={master} rows={rows} aggregate={aggregate} />
+      <SpecialDayCard rows={rows} master={master} aggregate={aggregate} />
+      <TrendsCard rows={rows} aggregate={aggregate} />
+      <MarketShareCard rows={rows} aggregate={aggregate} />
+    </TabWrap>
+  );
+}
+
+function PeakMixCard({ master, rows, aggregate }) {
+  const withCategory = useMemo(() => rows.map(r => {
+    const rule = matchPricingRule(master.pricing, r.courtId, r.date, r.hour);
+    return { ...r, liveCategory: rule ? rule.category : 'unclassified' };
+  }), [rows, master.pricing]);
+
+  const order = ['peak', 'off_peak', 'special', 'unclassified'];
+  const byCategory = groupAndAggregate(withCategory, r => r.liveCategory, aggregate)
+    .sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+  const totalRevenue = byCategory.reduce((s, c) => s + c.revenue, 0);
+
+  return (
+    <Card eyebrow="Pricing mix" title="Peak vs off-peak" style={{ marginBottom: 16 }}>
+      {byCategory.length === 0 ? <div style={styles.mutedNote}>No data for this scope.</div> : (
+        <table style={styles.table}>
+          <thead><tr>
+            <th style={styles.th}>Category</th><th style={styles.th}>Occupancy</th>
+            <th style={styles.th}>Occupied hrs</th><th style={styles.th}>Revenue</th><th style={styles.th}>Revenue share</th>
+          </tr></thead>
+          <tbody>
+            {byCategory.map(c => (
+              <tr key={c.key}>
+                <td style={styles.td}><Badge tone={c.key}>{c.key.replace('_', ' ')}</Badge></td>
+                <td style={styles.td}>{fmtPct(c.occupancyPct)}</td>
+                <td style={styles.td}>{c.occupiedHours.toLocaleString()}</td>
+                <td style={{ ...styles.td, fontFamily: 'var(--font-mono)' }}>{fmtMoney(c.revenue)}</td>
+                <td style={styles.td}>{fmtPct(safeDiv(c.revenue, totalRevenue) * 100)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
+        "Unclassified" hours have no pricing rule covering that court/time — set one up in Pricing to sharpen this.
+      </div>
+    </Card>
+  );
+}
+
+function ImpactRow({ label, a, b, fmt }) {
+  const upliftPct = b > 0 ? ((a - b) / b) * 100 : null;
+  const up = upliftPct != null && upliftPct >= 0;
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', gap: 6 }}>
+      <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>{label}</span>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontFamily: 'var(--font-mono)', fontSize: 12.5 }}>
+        <span>{fmt(a)} <span style={{ fontSize: 10, color: 'var(--muted)' }}>special</span></span>
+        <span style={{ color: 'var(--muted)' }}>vs {fmt(b)} normal</span>
+        {upliftPct != null && <span style={{ fontWeight: 800, color: up ? '#1F6B44' : 'var(--danger)' }}>{up ? '+' : ''}{upliftPct.toFixed(0)}%</span>}
+      </div>
+    </div>
+  );
+}
+
+function SpecialDayCard({ rows, master, aggregate }) {
+  function computeImpact(type, label) {
+    const specialDates = Object.entries(master.specialDays).filter(([d, info]) => info.type === type).map(([d]) => d);
+    if (specialDates.length === 0) return null;
+    const specialRows = rows.filter(r => specialDates.includes(r.date));
+    if (specialRows.length === 0) return null;
+    const dows = new Set(specialDates.map(d => dateToDow(d)));
+    const baselineRows = rows.filter(r => !r.special && dows.has(dateToDow(r.date)));
+    const specialAgg = aggregate(specialRows);
+    const baselineAgg = aggregate(baselineRows);
+    const specialDayCount = new Set(specialRows.map(r => r.date)).size;
+    const baselineDayCount = new Set(baselineRows.map(r => r.date)).size || 1;
+    return {
+      label, specialAgg, baselineAgg, specialDayCount,
+      specialAvgDailyRevenue: specialAgg.revenue / (specialDayCount || 1),
+      baselineAvgDailyRevenue: baselineAgg.revenue / baselineDayCount,
+    };
+  }
+
+  const poya = computeImpact('poya', 'Poya days');
+  const holiday = computeImpact('public_holiday', 'Public holidays');
+
+  return (
+    <Card eyebrow="Special days" title="Poya & holiday impact" style={{ marginBottom: 16 }}>
+      {!poya && !holiday ? (
+        <div style={styles.mutedNote}>Mark Poya days or public holidays in the Calendar tab — once you've logged occupancy on and around them, this compares them against normal days of the same weekday.</div>
+      ) : (
+        <div style={styles.twoCol}>
+          {[poya, holiday].filter(Boolean).map(x => (
+            <div key={x.label}>
+              <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8 }}>
+                {x.label} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>({x.specialDayCount} day{x.specialDayCount === 1 ? '' : 's'} logged)</span>
+              </div>
+              <ImpactRow label="Occupancy" a={x.specialAgg.occupancyPct} b={x.baselineAgg.occupancyPct} fmt={fmtPct} />
+              <ImpactRow label="Avg daily revenue" a={x.specialAvgDailyRevenue} b={x.baselineAvgDailyRevenue} fmt={fmtMoney} />
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function TrendsCard({ rows, aggregate }) {
+  const today = todayStr();
+  const thisWeekStart = startOfWeekMonday(today);
+  const lastWeekStart = addDaysStr(thisWeekStart, -7);
+  const thisWeekRows = rows.filter(r => r.date >= thisWeekStart && r.date <= today);
+  const lastWeekRows = rows.filter(r => r.date >= lastWeekStart && r.date < thisWeekStart);
+
+  const thisMonthStart = today.slice(0, 7) + '-01';
+  const prevMonthStart = addDaysStr(thisMonthStart, -1).slice(0, 7) + '-01';
+  const dayOfMonth = parseInt(today.split('-')[2], 10);
+  const prevMonthEnd = addDaysStr(prevMonthStart, dayOfMonth - 1);
+  const thisMonthRows = rows.filter(r => r.date >= thisMonthStart && r.date <= today);
+  const prevMonthRows = rows.filter(r => r.date >= prevMonthStart && r.date <= prevMonthEnd);
+
+  const wowThis = aggregate(thisWeekRows), wowLast = aggregate(lastWeekRows);
+  const momThis = aggregate(thisMonthRows), momLast = aggregate(prevMonthRows);
+  const hasAny = thisWeekRows.length + lastWeekRows.length + thisMonthRows.length + prevMonthRows.length > 0;
+
+  return (
+    <Card eyebrow="Trends" title="Week & month over month" style={{ marginBottom: 16 }}>
+      {!hasAny ? <div style={styles.mutedNote}>Not enough recent data to compare yet.</div> : (
+        <div style={styles.twoCol}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8 }}>This week vs last week</div>
+            <ImpactRow label="Occupancy" a={wowThis.occupancyPct} b={wowLast.occupancyPct} fmt={fmtPct} />
+            <ImpactRow label="Revenue" a={wowThis.revenue} b={wowLast.revenue} fmt={fmtMoney} />
+          </div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8 }}>
+              This month vs last month <span style={{ fontWeight: 400, color: 'var(--muted)', fontSize: 11 }}>(same day count)</span>
+            </div>
+            <ImpactRow label="Occupancy" a={momThis.occupancyPct} b={momLast.occupancyPct} fmt={fmtPct} />
+            <ImpactRow label="Revenue" a={momThis.revenue} b={momLast.revenue} fmt={fmtMoney} />
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function MarketShareCard({ rows, aggregate }) {
+  const [groupBy, setGroupBy] = useState('venueName');
+  const groupOptions = [
+    { value: 'venueName', label: 'By venue' },
+    { value: 'business', label: 'By business' },
+    { value: 'city', label: 'By city' },
+  ];
+
+  const total = aggregate(rows);
+  const groups = groupAndAggregate(rows, r => r[groupBy], aggregate)
+    .filter(g => g.availableHours > 0)
+    .map(g => {
+      const bookingShare = safeDiv(g.occupiedHours, total.occupiedHours) * 100;
+      const supplyShare = safeDiv(g.availableHours, total.availableHours) * 100;
+      const revenueShare = safeDiv(g.revenue, total.revenue) * 100;
+      return {
+        ...g, bookingShare, supplyShare, revenueShare,
+        performanceIndex: supplyShare > 0 ? bookingShare / supplyShare : null,
+      };
+    })
+    .sort((a, b) => (b.performanceIndex || 0) - (a.performanceIndex || 0));
+
+  return (
+    <Card eyebrow="Market share" title="Performance index" style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 12 }}>
+        <Select value={groupBy} onChange={setGroupBy} options={groupOptions} />
+      </div>
+      {groups.length === 0 ? <div style={styles.mutedNote}>No data for this scope.</div> : (
+        <table style={styles.table}>
+          <thead><tr>
+            <th style={styles.th}>Name</th><th style={styles.th}>Supply share</th>
+            <th style={styles.th}>Booking share</th><th style={styles.th}>Revenue share</th>
+            <th style={styles.th}>Performance index</th>
+          </tr></thead>
+          <tbody>
+            {groups.map(g => (
+              <tr key={g.key}>
+                <td style={styles.td}><b>{g.key}</b></td>
+                <td style={styles.td}>{fmtPct(g.supplyShare)}</td>
+                <td style={styles.td}>{fmtPct(g.bookingShare)}</td>
+                <td style={styles.td}>{fmtPct(g.revenueShare)}</td>
+                <td style={styles.td}>
+                  {g.performanceIndex != null
+                    ? <span style={{ fontWeight: 800, color: g.performanceIndex >= 1 ? '#1F6B44' : 'var(--danger)' }}>{g.performanceIndex.toFixed(2)}×</span>
+                    : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
+        Performance index = booking share ÷ supply share. Above 1.0× means it earns more booked hours than its share of available court-hours would predict; below 1.0× means it underperforms its capacity.
+      </div>
+    </Card>
   );
 }
 
