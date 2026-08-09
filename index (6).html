@@ -1,0 +1,1558 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Court Line — Pickleball Market Intel</title>
+
+<!--
+  ============================================================
+  SETUP — do this once before using the app:
+  1. Create a free project at supabase.com
+  2. Run supabase-schema.sql (see the project notes) in its SQL Editor
+  3. Copy your Project URL and "anon / public" API key from
+     Project Settings -> API, and paste them into SUPABASE_URL and
+     SUPABASE_ANON_KEY just below, inside the <script> tag.
+  ============================================================
+-->
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+
+<script>
+  // ---- PASTE YOUR SUPABASE VALUES HERE ----
+  const SUPABASE_URL = "https://ajrbehunsugfhrknxhrr.supabase.co";
+  const SUPABASE_ANON_KEY = "sb_publishable_EE9pVT7R3WNSaKNNOTGrkQ_LKsf2E7v";
+  // ------------------------------------------
+  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+</script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useCallback, useRef, Fragment } = React;
+
+/* =========================================================================
+   ICONS — small hand-drawn set (no external icon package needed)
+========================================================================= */
+
+function Ic({ size = 16, color = 'currentColor', strokeWidth = 2, style, className, children }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color}
+      strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"
+      style={style} className={className}>
+      {children}
+    </svg>
+  );
+}
+const Home = (p) => <Ic {...p}><path d="M4 11.5 12 4l8 7.5" /><path d="M6 10v9a1 1 0 0 0 1 1h4v-6h2v6h4a1 1 0 0 0 1-1v-9" /></Ic>;
+const MapPin = (p) => <Ic {...p}><path d="M12 21s7-7.5 7-12a7 7 0 1 0-14 0c0 4.5 7 12 7 12z" /><circle cx="12" cy="9" r="2.3" /></Ic>;
+const Building2 = (p) => <Ic {...p}><rect x="4" y="3" width="9" height="18" /><rect x="15" y="9" width="5" height="12" /><rect x="6.3" y="6" width="1.8" height="1.8" fill={p.color || 'currentColor'} stroke="none" /><rect x="10" y="6" width="1.8" height="1.8" fill={p.color || 'currentColor'} stroke="none" /><rect x="6.3" y="11" width="1.8" height="1.8" fill={p.color || 'currentColor'} stroke="none" /><rect x="10" y="11" width="1.8" height="1.8" fill={p.color || 'currentColor'} stroke="none" /></Ic>;
+const DollarSign = (p) => (
+  <svg width={p.size || 16} height={p.size || 16} viewBox="0 0 24 24" style={p.style} className={p.className}>
+    <text x="12" y="17" textAnchor="middle" fontSize="14" fontWeight="800" fill={p.color || 'currentColor'}>Rs</text>
+  </svg>
+);
+const Grid3x3 = (p) => <Ic {...p}><rect x="3" y="3" width="18" height="18" rx="1" /><line x1="9" y1="3" x2="9" y2="21" /><line x1="15" y1="3" x2="15" y2="21" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="3" y1="15" x2="21" y2="15" /></Ic>;
+const CalendarIcon = (p) => <Ic {...p}><rect x="3" y="5" width="18" height="16" rx="2" /><line x1="3" y1="10" x2="21" y2="10" /><line x1="8" y1="3" x2="8" y2="7" /><line x1="16" y1="3" x2="16" y2="7" /></Ic>;
+const Plus = (p) => <Ic {...p}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></Ic>;
+const Trash2 = (p) => <Ic {...p}><path d="M4 7h16" /><path d="M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3" /><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></Ic>;
+const Edit2 = (p) => <Ic {...p}><path d="M14.5 4.5l5 5L8 21H3v-5z" /></Ic>;
+const ChevronRight = (p) => <Ic {...p}><polyline points="9 6 15 12 9 18" /></Ic>;
+const ChevronDown = (p) => <Ic {...p}><polyline points="6 9 12 15 18 9" /></Ic>;
+const X = (p) => <Ic {...p}><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></Ic>;
+const Check = (p) => <Ic {...p}><polyline points="5 13 10 18 19 7" /></Ic>;
+const CircleDot = (p) => <Ic {...p}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="2.5" fill={p.color || 'currentColor'} stroke="none" /></Ic>;
+const Trophy = (p) => <Ic {...p}><path d="M6 4h12v3a6 6 0 0 1-12 0V4z" /><path d="M6 5H3.5A2.5 2.5 0 0 0 6 7.5" /><path d="M18 5h2.5A2.5 2.5 0 0 1 18 7.5" /><line x1="12" y1="13" x2="12" y2="18" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="18" x2="12" y2="21" /></Ic>;
+const Loader2 = (p) => <Ic {...p}><circle cx="12" cy="12" r="9" opacity="0.25" /><path d="M21 12a9 9 0 0 0-9-9" /></Ic>;
+const RefreshCw = (p) => <Ic {...p}><path d="M21 12a9 9 0 1 1-3-6.7" /><polyline points="21 3 21 9 15 9" /></Ic>;
+const Sparkles = (p) => <Ic {...p}><path d="M12 3l1.2 4.8L18 9l-4.8 1.2L12 15l-1.2-4.8L6 9l4.8-1.2L12 3z" /><path d="M19 14l.6 2.4L22 17l-2.4.6L19 20l-.6-2.4L16 17l2.4-.6L19 14z" /></Ic>;
+const Info = (p) => <Ic {...p}><circle cx="12" cy="12" r="9" /><line x1="12" y1="11" x2="12" y2="16" /><circle cx="12" cy="7.5" r="0.6" fill={p.color || 'currentColor'} stroke="none" /></Ic>;
+
+/* =========================================================================
+   SUPABASE STORAGE — get/set/delete/list, backed by table `pbi_data`
+   Reads the client created from SUPABASE_URL / SUPABASE_ANON_KEY below.
+========================================================================= */
+
+async function storageGet(key) {
+  try {
+    const { data, error } = await sb.from('pbi_data').select('value').eq('key', key).maybeSingle();
+    if (error || !data) return null;
+    return data.value;
+  } catch (e) { console.error('storageGet failed', key, e); return null; }
+}
+async function storageSet(key, value) {
+  try {
+    const payload = typeof value === 'string' ? value : JSON.stringify(value);
+    const { error } = await sb.from('pbi_data').upsert({ key, value: payload, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+    if (error) { console.error('storageSet failed', key, error); return false; }
+    return true;
+  } catch (e) { console.error('storageSet failed', key, e); return false; }
+}
+async function storageDelete(key) {
+  try {
+    const { error } = await sb.from('pbi_data').delete().eq('key', key);
+    return !error;
+  } catch (e) { console.error('storageDelete failed', key, e); return false; }
+}
+async function storageList(prefix) {
+  try {
+    const { data, error } = await sb.from('pbi_data').select('key').like('key', `${prefix}%`);
+    if (error || !data) return [];
+    return data.map((r) => r.key);
+  } catch (e) { console.error('storageList failed', prefix, e); return []; }
+}
+
+/* =========================================================================
+   CONSTANTS
+========================================================================= */
+
+const PROVINCE_DISTRICTS = {
+  'Western Province': ['Colombo', 'Gampaha', 'Kalutara'],
+  'Central Province': ['Kandy', 'Matale', 'Nuwara Eliya'],
+  'Southern Province': ['Galle', 'Matara', 'Hambantota'],
+  'Northern Province': ['Jaffna', 'Kilinochchi', 'Mannar', 'Vavuniya', 'Mullaitivu'],
+  'Eastern Province': ['Ampara', 'Batticaloa', 'Trincomalee'],
+  'North Western Province': ['Kurunegala', 'Puttalam'],
+  'North Central Province': ['Anuradhapura', 'Polonnaruwa'],
+  'Uva Province': ['Badulla', 'Monaragala'],
+  'Sabaragamuwa Province': ['Ratnapura', 'Kegalle'],
+};
+const PROVINCES = Object.keys(PROVINCE_DISTRICTS);
+
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']; // heatmap column order Mon->Sun
+const DAY_SHORT_IDX = [1, 2, 3, 4, 5, 6, 0]; // maps DAY_SHORT position -> JS getDay() index
+
+const HOTSPOT_LEVELS = [
+  { max: 20, label: 'Very Quiet', color: '#E4EEE8' },
+  { max: 40, label: 'Quiet', color: '#BFE0CC' },
+  { max: 60, label: 'Moderate', color: '#8AC79E' },
+  { max: 80, label: 'Busy', color: '#3F8F5F' },
+  { max: 90, label: 'Very Busy', color: '#E7B430' },
+  { max: 101, label: 'Saturated', color: '#C1503F' },
+];
+
+const VENUE_TYPES = ['indoor', 'outdoor', 'covered_outdoor'];
+const COURT_SURFACES = ['acrylic', 'concrete', 'synthetic_grass', 'wood', 'other'];
+const PRICING_CATEGORIES = ['peak', 'off_peak', 'special'];
+const DAY_TYPE_OPTIONS = [
+  { value: 'all', label: 'Every day' },
+  { value: 'weekday', label: 'Weekdays (Mon–Fri)' },
+  { value: 'weekend', label: 'Weekends (Sat–Sun)' },
+];
+
+const SPECIAL_DAY_TYPES = [
+  { value: 'poya', label: 'Poya Day' },
+  { value: 'public_holiday', label: 'Public Holiday' },
+  { value: 'special_event', label: 'Special Event' },
+];
+
+/* =========================================================================
+   UTILITIES
+========================================================================= */
+
+const uid = (p = 'id') => p + '_' + Math.random().toString(36).slice(2, 10);
+const pad2 = (n) => String(n).padStart(2, '0');
+
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+function addDaysStr(dateStr, delta) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + delta);
+  return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+}
+function dateToDow(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d).getDay();
+}
+function isWeekendDate(dateStr) {
+  const dow = dateToDow(dateStr);
+  return dow === 0 || dow === 6;
+}
+function monthKeyOf(dateStr) { return dateStr.slice(0, 7); }
+function timeToMin(t) { if (!t) return 0; const [h, m] = t.split(':').map(Number); return h * 60 + m; }
+function hourLabel(h) {
+  const period = h < 12 ? 'AM' : 'PM';
+  let hh = h % 12; if (hh === 0) hh = 12;
+  return `${hh}${period}`;
+}
+function fmtMoney(n) {
+  if (n == null || isNaN(n)) return 'Rs 0';
+  return 'Rs ' + Math.round(n).toLocaleString('en-US');
+}
+function fmtPct(n) {
+  if (n == null || isNaN(n)) return '—';
+  return n.toFixed(1) + '%';
+}
+function safeDiv(a, b) { return b > 0 ? a / b : 0; }
+
+function defaultHourStates(openTime, closeTime) {
+  const openMin = timeToMin(openTime || '06:00');
+  const closeMin = timeToMin(closeTime || '22:00');
+  const arr = [];
+  for (let h = 0; h < 24; h++) {
+    const withinOpen = h * 60 >= openMin && h * 60 < closeMin;
+    arr.push({ state: withinOpen ? 'available' : 'closed', price: null, category: null });
+  }
+  return arr;
+}
+
+function courtHours(court, venue) {
+  return {
+    open: court.openOverride || venue?.openingTime || '06:00',
+    close: court.closeOverride || venue?.closingTime || '22:00',
+  };
+}
+
+function matchPricingRule(rules, courtId, dateStr, hour) {
+  const dow = dateToDow(dateStr);
+  const weekend = dow === 0 || dow === 6;
+  const candidates = rules.filter(r => {
+    if (r.courtId !== courtId) return false;
+    if (r.effectiveFrom && dateStr < r.effectiveFrom) return false;
+    if (r.effectiveUntil && dateStr > r.effectiveUntil) return false;
+    if (r.dayType === 'weekday' && weekend) return false;
+    if (r.dayType === 'weekend' && !weekend) return false;
+    const startMin = timeToMin(r.startTime), endMin = timeToMin(r.endTime);
+    const hMin = hour * 60;
+    return hMin >= startMin && hMin < endMin;
+  });
+  if (candidates.length === 0) return null;
+  // prefer most specific (non-'all' dayType), then most recent effectiveFrom
+  candidates.sort((a, b) => {
+    const aSpecific = a.dayType !== 'all' ? 1 : 0;
+    const bSpecific = b.dayType !== 'all' ? 1 : 0;
+    if (aSpecific !== bSpecific) return bSpecific - aSpecific;
+    return (b.effectiveFrom || '').localeCompare(a.effectiveFrom || '');
+  });
+  return candidates[0];
+}
+
+function periodOfHour(h) {
+  if (h >= 5 && h < 8) return 'Early Morning';
+  if (h >= 8 && h < 12) return 'Morning';
+  if (h >= 12 && h < 16) return 'Afternoon';
+  if (h >= 16 && h < 20) return 'Evening';
+  if (h >= 20 && h < 24) return 'Night';
+  return 'Late Night';
+}
+
+function hotspotFor(pct) {
+  for (const lvl of HOTSPOT_LEVELS) if (pct < lvl.max) return lvl;
+  return HOTSPOT_LEVELS[HOTSPOT_LEVELS.length - 1];
+}
+
+/* =========================================================================
+   STORAGE — see ./lib/storage.js (Supabase-backed get/set/delete/list)
+========================================================================= */
+
+const MASTER_KEY = 'pbi_master_v1';
+
+const emptyMaster = () => ({ venues: [], courts: [], pricing: [], specialDays: {} });
+
+/* =========================================================================
+   SAMPLE DATA
+========================================================================= */
+
+function buildSampleData() {
+  const venues = [
+    { id: 'v1', name: 'Kitchen Line Colombo', country: 'Sri Lanka', province: 'Western Province', district: 'Colombo', city: 'Colombo 5', address: 'Havelock Rd', lat: 6.8845, lng: 79.8657, courtCount: 3, type: 'covered_outdoor', openingTime: '06:00', closingTime: '23:00', active: true, notes: '' },
+    { id: 'v2', name: 'Dink & Drive Boralesgamuwa', country: 'Sri Lanka', province: 'Western Province', district: 'Colombo', city: 'Boralesgamuwa', address: 'High Level Rd', lat: 6.8397, lng: 79.9027, courtCount: 4, type: 'outdoor', openingTime: '06:00', closingTime: '22:00', active: true, notes: '' },
+    { id: 'v3', name: 'Nugegoda Paddle Club', country: 'Sri Lanka', province: 'Western Province', district: 'Colombo', city: 'Nugegoda', address: 'High Level Rd', lat: 6.8721, lng: 79.8890, courtCount: 2, type: 'indoor', openingTime: '07:00', closingTime: '23:00', active: true, notes: '' },
+  ];
+  const courts = [];
+  venues.forEach(v => {
+    for (let i = 1; i <= v.courtCount; i++) {
+      courts.push({ id: uid('c'), venueId: v.id, name: `Court ${i}`, number: i, type: 'standard', surface: 'acrylic', active: true, openOverride: '', closeOverride: '', notes: '' });
+    }
+  });
+  const pricing = [];
+  courts.forEach(c => {
+    pricing.push({ id: uid('pr'), courtId: c.id, dayType: 'weekday', startTime: '06:00', endTime: '16:00', price: 2500, category: 'off_peak', effectiveFrom: '2026-01-01', effectiveUntil: '', label: 'Weekday off-peak' });
+    pricing.push({ id: uid('pr'), courtId: c.id, dayType: 'weekday', startTime: '16:00', endTime: '23:59', price: 3500, category: 'peak', effectiveFrom: '2026-01-01', effectiveUntil: '', label: 'Weekday evening peak' });
+    pricing.push({ id: uid('pr'), courtId: c.id, dayType: 'weekend', startTime: '06:00', endTime: '23:59', price: 3500, category: 'peak', effectiveFrom: '2026-01-01', effectiveUntil: '', label: 'Weekend peak' });
+  });
+
+  const specialDays = {};
+  // mark today as nothing special; leave calendar empty for the user to fill in.
+
+  // occupancy: last 14 days, plausible pattern - evenings & weekends busier
+  const occByMonth = {};
+  const today = todayStr();
+  for (let d = 13; d >= 0; d--) {
+    const dateStr = addDaysStr(today, -d);
+    const mKey = monthKeyOf(dateStr);
+    if (!occByMonth[mKey]) occByMonth[mKey] = {};
+    const weekend = isWeekendDate(dateStr);
+    courts.forEach(c => {
+      const venue = venues.find(v => v.id === c.venueId);
+      const { open, close } = courtHours(c, venue);
+      const hours = defaultHourStates(open, close);
+      for (let h = 0; h < 24; h++) {
+        if (hours[h].state === 'closed') continue;
+        let baseProb = 0.25;
+        if (h >= 17 && h <= 21) baseProb = weekend ? 0.85 : 0.7;
+        else if (h >= 12 && h <= 16) baseProb = weekend ? 0.55 : 0.3;
+        else if (h >= 6 && h <= 9) baseProb = weekend ? 0.5 : 0.35;
+        const occupied = Math.random() < baseProb;
+        const rule = matchPricingRule(pricing, c.id, dateStr, h);
+        hours[h] = {
+          state: occupied ? 'occupied' : 'available',
+          price: rule ? rule.price : null,
+          category: rule ? rule.category : null,
+        };
+      }
+      if (!occByMonth[mKey][c.id]) occByMonth[mKey][c.id] = {};
+      occByMonth[mKey][c.id][dateStr] = hours;
+    });
+  }
+
+  return { master: { venues, courts, pricing, specialDays }, occByMonth };
+}
+
+/* =========================================================================
+   MAIN APP
+========================================================================= */
+
+const TABS = [
+  { id: 'overview', label: 'Overview', icon: Home },
+  { id: 'geography', label: 'Geography', icon: MapPin },
+  { id: 'venues', label: 'Venues & Courts', icon: Building2 },
+  { id: 'pricing', label: 'Pricing', icon: DollarSign },
+  { id: 'occupancy', label: 'Log Occupancy', icon: CircleDot },
+  { id: 'heatmap', label: 'Heatmap', icon: Grid3x3 },
+  { id: 'rankings', label: 'Rankings', icon: Trophy },
+  { id: 'calendar', label: 'Calendar', icon: CalendarIcon },
+];
+
+function App() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [tab, setTab] = useState('overview');
+  const [master, setMaster] = useState(emptyMaster());
+  const [occData, setOccData] = useState({}); // { monthKey: { courtId: { date: [24] } } }
+  const loadedMonths = useRef(new Set());
+
+  useEffect(() => { loadAll(); }, []);
+
+  async function loadAll() {
+    setLoading(true);
+    const m = await storageGet(MASTER_KEY, true);
+    if (m) {
+      try { setMaster(JSON.parse(m)); } catch (e) { setMaster(emptyMaster()); }
+    }
+    const keys = await storageList('pbi_occ_', true);
+    const occ = {};
+    for (const k of keys) {
+      const v = await storageGet(k, true);
+      if (v) {
+        try {
+          const monthKey = k.replace('pbi_occ_', '');
+          occ[monthKey] = JSON.parse(v);
+          loadedMonths.current.add(monthKey);
+        } catch (e) { /* skip */ }
+      }
+    }
+    setOccData(occ);
+    setLoading(false);
+  }
+
+  async function persistMaster(next) {
+    setMaster(next);
+    setSaving(true);
+    await storageSet(MASTER_KEY, next, true);
+    setSaving(false);
+  }
+
+  async function persistOccMonth(monthKey, monthData) {
+    setOccData(prev => ({ ...prev, [monthKey]: monthData }));
+    setSaving(true);
+    await storageSet('pbi_occ_' + monthKey, monthData, true);
+    setSaving(false);
+  }
+
+  async function loadSample() {
+    setSaving(true);
+    const { master: m, occByMonth } = buildSampleData();
+    await storageSet(MASTER_KEY, m, true);
+    for (const mk of Object.keys(occByMonth)) {
+      await storageSet('pbi_occ_' + mk, occByMonth[mk], true);
+    }
+    setMaster(m);
+    setOccData(occByMonth);
+    setSaving(false);
+  }
+
+  async function clearAll() {
+    setSaving(true);
+    await storageSet(MASTER_KEY, emptyMaster(), true);
+    for (const mk of Object.keys(occData)) {
+      try { await storageDelete('pbi_occ_' + mk); } catch (e) {}
+    }
+    setMaster(emptyMaster());
+    setOccData({});
+    setSaving(false);
+  }
+
+  // ---- flatten occupancy into analytics-friendly rows ----
+  const flatRows = useMemo(() => {
+    const rows = [];
+    const courtById = {}; master.courts.forEach(c => courtById[c.id] = c);
+    const venueById = {}; master.venues.forEach(v => venueById[v.id] = v);
+    Object.entries(occData).forEach(([monthKey, byCourt]) => {
+      Object.entries(byCourt).forEach(([courtId, byDate]) => {
+        const court = courtById[courtId];
+        if (!court) return;
+        const venue = venueById[court.venueId];
+        if (!venue) return;
+        Object.entries(byDate).forEach(([dateStr, hours]) => {
+          const weekend = isWeekendDate(dateStr);
+          const special = master.specialDays[dateStr];
+          hours.forEach((h, hour) => {
+            if (h.state === 'closed') return;
+            rows.push({
+              courtId, courtName: court.name, venueId: venue.id, venueName: venue.name,
+              city: venue.city, district: venue.district, province: venue.province,
+              date: dateStr, hour, weekend, special: special ? special.type : null,
+              state: h.state, occupied: h.state === 'occupied',
+              price: h.price, category: h.category,
+            });
+          });
+        });
+      });
+    });
+    return rows;
+  }, [occData, master]);
+
+  function aggregate(rows) {
+    const availableHours = rows.length;
+    const occupiedHours = rows.filter(r => r.occupied).length;
+    const revenue = rows.filter(r => r.occupied).reduce((s, r) => s + (r.price || 0), 0);
+    const occupancyPct = safeDiv(occupiedHours, availableHours) * 100;
+    const revpah = safeDiv(revenue, availableHours);
+    const avgRate = safeDiv(revenue, occupiedHours);
+    return { availableHours, occupiedHours, revenue, occupancyPct, revpah, avgRate };
+  }
+
+  const ctx = {
+    master, setMaster: persistMaster, occData, setOccData, persistOccMonth,
+    flatRows, aggregate, saving, loadSample, clearAll,
+  };
+
+  if (loading) {
+    return (
+      <div style={styles.loadingWrap}>
+        <style>{GLOBAL_CSS}</style>
+        <Loader2 className="spin" size={28} />
+        <div style={{ marginTop: 10, fontFamily: 'var(--font-body)', color: 'var(--muted)' }}>Loading court data…</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={styles.app}>
+      <style>{GLOBAL_CSS}</style>
+      <Sidebar tab={tab} setTab={setTab} venueCount={master.venues.length} saving={saving} />
+      <main style={styles.main}>
+        {tab === 'overview' && <OverviewTab ctx={ctx} />}
+        {tab === 'geography' && <GeographyTab ctx={ctx} />}
+        {tab === 'venues' && <VenuesTab ctx={ctx} />}
+        {tab === 'pricing' && <PricingTab ctx={ctx} />}
+        {tab === 'occupancy' && <OccupancyTab ctx={ctx} />}
+        {tab === 'heatmap' && <HeatmapTab ctx={ctx} />}
+        {tab === 'rankings' && <RankingsTab ctx={ctx} />}
+        {tab === 'calendar' && <CalendarTab ctx={ctx} />}
+      </main>
+    </div>
+  );
+}
+
+/* =========================================================================
+   SIDEBAR
+========================================================================= */
+
+function Sidebar({ tab, setTab, venueCount, saving }) {
+  return (
+    <aside style={styles.sidebar}>
+      <div style={styles.brand}>
+        <div style={styles.brandBall} />
+        <div>
+          <div style={styles.brandTitle}>COURT&nbsp;LINE</div>
+          <div style={styles.brandSub}>Pickleball Market Intel — Sri Lanka</div>
+        </div>
+      </div>
+      <nav style={styles.nav}>
+        {TABS.map(t => {
+          const Icon = t.icon;
+          const active = tab === t.id;
+          return (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              style={{ ...styles.navBtn, ...(active ? styles.navBtnActive : {}) }}>
+              <Icon size={16} strokeWidth={2.25} />
+              <span>{t.label}</span>
+              {active && <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.6 }} />}
+            </button>
+          );
+        })}
+      </nav>
+      <div style={styles.sidebarFoot}>
+        <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: '.03em' }}>
+          {venueCount} venue{venueCount === 1 ? '' : 's'} tracked
+        </div>
+        <div style={{ fontSize: 11, color: saving ? 'var(--ball)' : 'var(--muted)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
+          {saving ? <><Loader2 size={11} className="spin" /> Saving…</> : <><Check size={11} /> Synced</>}
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 8, opacity: 0.75 }}>
+          Data is shared with everyone using this app.
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+/* =========================================================================
+   SHARED UI BITS
+========================================================================= */
+
+function Card({ title, eyebrow, right, children, style }) {
+  return (
+    <div style={{ ...styles.card, ...style }}>
+      {(title || right) && (
+        <div style={styles.cardHead}>
+          <div>
+            {eyebrow && <div style={styles.eyebrow}>{eyebrow}</div>}
+            {title && <div style={styles.cardTitle}>{title}</div>}
+          </div>
+          {right}
+        </div>
+      )}
+      {children}
+    </div>
+  );
+}
+
+function StatBlock({ label, value, sub, accent }) {
+  return (
+    <div style={styles.statBlock}>
+      <div style={styles.statLabel}>{label}</div>
+      <div style={{ ...styles.statValue, color: accent || 'var(--ink)' }}>{value}</div>
+      {sub && <div style={styles.statSub}>{sub}</div>}
+    </div>
+  );
+}
+
+function Select({ value, onChange, options, placeholder, style }) {
+  return (
+    <select value={value} onChange={e => onChange(e.target.value)} style={{ ...styles.input, ...style }}>
+      {placeholder && <option value="">{placeholder}</option>}
+      {options.map(o => (typeof o === 'string'
+        ? <option key={o} value={o}>{o}</option>
+        : <option key={o.value} value={o.value}>{o.label}</option>))}
+    </select>
+  );
+}
+
+function EmptyState({ icon: Icon, title, body, action }) {
+  return (
+    <div style={styles.emptyState}>
+      <Icon size={26} strokeWidth={1.5} color="var(--court)" />
+      <div style={{ fontWeight: 700, marginTop: 10, fontFamily: 'var(--font-display)', letterSpacing: '.02em' }}>{title}</div>
+      <div style={{ color: 'var(--muted)', fontSize: 13, marginTop: 4, maxWidth: 380, textAlign: 'center' }}>{body}</div>
+      {action}
+    </div>
+  );
+}
+
+function Badge({ children, tone }) {
+  const tones = {
+    peak: { bg: '#FCEFD1', color: '#8A5A0A' },
+    off_peak: { bg: '#DDEFE4', color: '#1F6B44' },
+    special: { bg: '#E6DEF7', color: '#5B3A9E' },
+    poya: { bg: '#E6DEF7', color: '#5B3A9E' },
+    public_holiday: { bg: '#FBE0DC', color: '#A13C2C' },
+    special_event: { bg: '#DDEAF7', color: '#1B577F' },
+    weekend: { bg: '#FCEFD1', color: '#8A5A0A' },
+    weekday: { bg: '#E7ECEA', color: '#4B5C56' },
+  };
+  const t = tones[tone] || { bg: '#E7ECEA', color: '#4B5C56' };
+  return <span style={{ background: t.bg, color: t.color, fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, letterSpacing: '.02em' }}>{children}</span>;
+}
+
+/* =========================================================================
+   OVERVIEW TAB
+========================================================================= */
+
+function OverviewTab({ ctx }) {
+  const { master, flatRows, aggregate, loadSample, clearAll } = ctx;
+  const today = todayStr();
+  const last30 = addDaysStr(today, -30);
+
+  const todayRows = flatRows.filter(r => r.date === today);
+  const recentRows = flatRows.filter(r => r.date >= last30 && r.date <= today);
+  const weekdayRows = recentRows.filter(r => !r.weekend);
+  const weekendRows = recentRows.filter(r => r.weekend);
+
+  const todayAgg = aggregate(todayRows);
+  const recentAgg = aggregate(recentRows);
+  const weekdayAgg = aggregate(weekdayRows);
+  const weekendAgg = aggregate(weekendRows);
+
+  const byHourToday = Array.from({ length: 24 }, (_, h) => {
+    const rows = todayRows.filter(r => r.hour === h);
+    return { h, ...aggregate(rows) };
+  });
+  const busiestHour = byHourToday.filter(x => x.availableHours > 0).sort((a, b) => b.occupancyPct - a.occupancyPct)[0];
+
+  const byCityRecent = groupAndAggregate(recentRows, r => r.city, aggregate);
+  const busiestCity = byCityRecent.sort((a, b) => b.occupancyPct - a.occupancyPct)[0];
+
+  const byVenueRecent = groupAndAggregate(recentRows, r => r.venueName, aggregate);
+  const busiestVenue = byVenueRecent.sort((a, b) => b.occupancyPct - a.occupancyPct)[0];
+
+  if (master.venues.length === 0) {
+    return (
+      <TabWrap title="Market Overview" eyebrow="Sri Lanka · National">
+        <EmptyState icon={Sparkles} title="No data yet"
+          body="Add your first venue, or load sample data to explore every screen before you start entering real courts."
+          action={
+            <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+              <button style={styles.primaryBtn} onClick={loadSample}>Load sample data</button>
+            </div>
+          } />
+      </TabWrap>
+    );
+  }
+
+  return (
+    <TabWrap title="Market Overview" eyebrow="Sri Lanka · National"
+      right={<button style={styles.ghostBtn} onClick={() => { if (confirm('Clear ALL data? This cannot be undone.')) clearAll(); }}>Clear all data</button>}>
+
+      <div style={styles.statGrid}>
+        <StatBlock label="Venues tracked" value={master.venues.length} />
+        <StatBlock label="Courts tracked" value={master.courts.length} />
+        <StatBlock label="Cities tracked" value={new Set(master.venues.map(v => v.city)).size} />
+        <StatBlock label="Today's occupancy" value={fmtPct(todayAgg.occupancyPct)} accent="var(--court)" />
+        <StatBlock label="Today's estimated revenue" value={fmtMoney(todayAgg.revenue)} accent="var(--ball-dark)" />
+        <StatBlock label="Busiest hour today" value={busiestHour ? hourLabel(busiestHour.h) : '—'} sub={busiestHour ? fmtPct(busiestHour.occupancyPct) + ' occupied' : ''} />
+      </div>
+
+      <div style={styles.twoCol}>
+        <Card eyebrow="Last 30 days" title="Weekday vs Weekend Occupancy">
+          <div style={styles.compareRow}>
+            <CompareBar label="Weekday" pct={weekdayAgg.occupancyPct} hours={weekdayAgg.occupiedHours} />
+            <CompareBar label="Weekend" pct={weekendAgg.occupancyPct} hours={weekendAgg.occupiedHours} accent="var(--ball-dark)" />
+          </div>
+          <div style={{ marginTop: 14, fontSize: 12, color: 'var(--muted)' }}>
+            {recentAgg.occupiedHours.toLocaleString()} occupied court-hours of {recentAgg.availableHours.toLocaleString()} available · Est. revenue {fmtMoney(recentAgg.revenue)}
+          </div>
+        </Card>
+
+        <Card eyebrow="Last 30 days" title="Busiest right now">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <MiniRankRow label="City" value={busiestCity ? busiestCity.key : '—'} pct={busiestCity?.occupancyPct} />
+            <MiniRankRow label="Venue" value={busiestVenue ? busiestVenue.key : '—'} pct={busiestVenue?.occupancyPct} />
+            <MiniRankRow label="Hour (today)" value={busiestHour ? hourLabel(busiestHour.h) : '—'} pct={busiestHour?.occupancyPct} />
+          </div>
+        </Card>
+      </div>
+
+      <Card eyebrow="Today" title="Hour-by-hour snapshot">
+        <MiniHourStrip byHour={byHourToday} />
+      </Card>
+    </TabWrap>
+  );
+}
+
+function MiniHourStrip({ byHour }) {
+  return (
+    <div style={{ display: 'flex', gap: 3, marginTop: 8 }}>
+      {byHour.map(x => {
+        const lvl = x.availableHours > 0 ? hotspotFor(x.occupancyPct) : null;
+        return (
+          <div key={x.h} title={`${hourLabel(x.h)}: ${x.availableHours > 0 ? fmtPct(x.occupancyPct) : 'closed'}`}
+            style={{
+              flex: 1, height: 46, borderRadius: 4,
+              background: lvl ? lvl.color : 'var(--border)',
+              opacity: x.availableHours > 0 ? 1 : 0.35,
+              display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 3,
+            }}>
+            <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: lvl && lvl.max > 60 ? '#fff' : 'var(--ink)', opacity: 0.85 }}>{x.h}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function CompareBar({ label, pct, hours, accent }) {
+  return (
+    <div style={{ flex: 1 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
+        <span style={{ fontWeight: 700 }}>{label}</span>
+        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--muted)' }}>{fmtPct(pct)}</span>
+      </div>
+      <div style={styles.barTrack}>
+        <div style={{ ...styles.barFill, width: `${Math.min(100, pct)}%`, background: accent || 'var(--court)' }} />
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>{hours.toLocaleString()} occupied hrs</div>
+    </div>
+  );
+}
+
+function MiniRankRow({ label, value, pct }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
+      <div>
+        <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--muted)' }}>{label}</div>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>{value}</div>
+      </div>
+      {pct != null && <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--court)' }}>{fmtPct(pct)}</div>}
+    </div>
+  );
+}
+
+function groupAndAggregate(rows, keyFn, aggregate) {
+  const groups = {};
+  rows.forEach(r => {
+    const k = keyFn(r);
+    if (!k) return;
+    if (!groups[k]) groups[k] = [];
+    groups[k].push(r);
+  });
+  return Object.entries(groups).map(([key, rs]) => ({ key, ...aggregate(rs), count: rs.length }));
+}
+
+function TabWrap({ title, eyebrow, right, children }) {
+  return (
+    <div>
+      <div style={styles.tabHeader}>
+        <div>
+          {eyebrow && <div style={styles.eyebrow}>{eyebrow}</div>}
+          <h1 style={styles.h1}>{title}</h1>
+        </div>
+        {right}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/* =========================================================================
+   GEOGRAPHY TAB — hierarchical drill-down
+========================================================================= */
+
+function GeographyTab({ ctx }) {
+  const { master, flatRows, aggregate } = ctx;
+  const [province, setProvince] = useState('');
+  const [district, setDistrict] = useState('');
+  const [city, setCity] = useState('');
+
+  const districts = province ? PROVINCE_DISTRICTS[province] : [...new Set(master.venues.map(v => v.district))];
+  const cities = [...new Set(master.venues.filter(v => (!province || v.province === province) && (!district || v.district === district)).map(v => v.city))];
+
+  let rows = flatRows;
+  if (province) rows = rows.filter(r => r.province === province);
+  if (district) rows = rows.filter(r => r.district === district);
+  if (city) rows = rows.filter(r => r.city === city);
+
+  const agg = aggregate(rows);
+  const level = city ? 'city' : district ? 'district' : province ? 'province' : 'national';
+
+  const groupKey = level === 'national' ? r => r.province
+    : level === 'province' ? r => r.district
+    : level === 'district' ? r => r.city
+    : r => r.venueName;
+
+  const breakdown = groupAndAggregate(rows, groupKey, aggregate).sort((a, b) => b.occupancyPct - a.occupancyPct);
+
+  const venuesInScope = master.venues.filter(v =>
+    (!province || v.province === province) && (!district || v.district === district) && (!city || v.city === city));
+
+  return (
+    <TabWrap title="Geographic Drill-Down" eyebrow="Sri Lanka → Province → District → City → Venue → Court">
+      <div style={styles.filterRow}>
+        <Select value={province} onChange={v => { setProvince(v); setDistrict(''); setCity(''); }} placeholder="All provinces" options={PROVINCES} />
+        <Select value={district} onChange={v => { setDistrict(v); setCity(''); }} placeholder="All districts" options={districts} />
+        <Select value={city} onChange={setCity} placeholder="All cities" options={cities} />
+      </div>
+
+      <div style={styles.statGrid}>
+        <StatBlock label="Venues in scope" value={venuesInScope.length} />
+        <StatBlock label="Available court-hrs" value={agg.availableHours.toLocaleString()} />
+        <StatBlock label="Occupied court-hrs" value={agg.occupiedHours.toLocaleString()} />
+        <StatBlock label="Occupancy" value={fmtPct(agg.occupancyPct)} accent="var(--court)" />
+        <StatBlock label="Est. revenue" value={fmtMoney(agg.revenue)} accent="var(--ball-dark)" />
+        <StatBlock label="RevPAH" value={fmtMoney(agg.revpah)} sub="revenue / available hr" />
+      </div>
+
+      <Card title={`Breakdown by ${level === 'national' ? 'province' : level === 'province' ? 'district' : level === 'district' ? 'city' : 'venue'}`}>
+        {breakdown.length === 0 ? <div style={styles.mutedNote}>No occupancy data logged for this scope yet.</div> : (
+          <BreakdownTable rows={breakdown} />
+        )}
+      </Card>
+    </TabWrap>
+  );
+}
+
+function BreakdownTable({ rows }) {
+  return (
+    <table style={styles.table}>
+      <thead>
+        <tr>
+          <th style={styles.th}>Name</th>
+          <th style={styles.th}>Occupancy</th>
+          <th style={styles.th}>Occupied hrs</th>
+          <th style={styles.th}>Available hrs</th>
+          <th style={styles.th}>Est. revenue</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(r => (
+          <tr key={r.key}>
+            <td style={styles.td}><b>{r.key}</b></td>
+            <td style={styles.td}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ ...styles.miniBarTrack }}>
+                  <div style={{ ...styles.miniBarFill, width: `${Math.min(100, r.occupancyPct)}%` }} />
+                </div>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{fmtPct(r.occupancyPct)}</span>
+              </div>
+            </td>
+            <td style={styles.td}>{r.occupiedHours.toLocaleString()}</td>
+            <td style={styles.td}>{r.availableHours.toLocaleString()}</td>
+            <td style={styles.td}>{fmtMoney(r.revenue)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/* =========================================================================
+   VENUES & COURTS TAB
+========================================================================= */
+
+function VenuesTab({ ctx }) {
+  const { master, setMaster, loadSample } = ctx;
+  const [editingVenue, setEditingVenue] = useState(null); // null = closed, 'new' = new, obj = editing
+  const [expanded, setExpanded] = useState(null);
+  const [editingCourt, setEditingCourt] = useState(null); // {venueId, court|'new'}
+
+  function saveVenue(venue) {
+    const exists = master.venues.some(v => v.id === venue.id);
+    const venues = exists ? master.venues.map(v => v.id === venue.id ? venue : v) : [...master.venues, venue];
+    setMaster({ ...master, venues });
+    setEditingVenue(null);
+  }
+  function deleteVenue(id) {
+    if (!confirm('Delete this venue and all its courts? Occupancy history for its courts will be orphaned.')) return;
+    const courtIds = master.courts.filter(c => c.venueId === id).map(c => c.id);
+    setMaster({
+      ...master,
+      venues: master.venues.filter(v => v.id !== id),
+      courts: master.courts.filter(c => c.venueId !== id),
+      pricing: master.pricing.filter(p => !courtIds.includes(p.courtId)),
+    });
+  }
+  function saveCourt(court) {
+    const exists = master.courts.some(c => c.id === court.id);
+    const courts = exists ? master.courts.map(c => c.id === court.id ? court : c) : [...master.courts, court];
+    setMaster({ ...master, courts });
+    setEditingCourt(null);
+  }
+  function deleteCourt(id) {
+    if (!confirm('Delete this court? Its pricing rules will also be removed.')) return;
+    setMaster({ ...master, courts: master.courts.filter(c => c.id !== id), pricing: master.pricing.filter(p => p.courtId !== id) });
+  }
+
+  return (
+    <TabWrap title="Venues & Courts" eyebrow="Master data"
+      right={<button style={styles.primaryBtn} onClick={() => setEditingVenue('new')}><Plus size={14} /> Add venue</button>}>
+
+      {master.venues.length === 0 && (
+        <EmptyState icon={Building2} title="No venues yet"
+          body="Add your first venue manually, or load realistic sample data (3 venues, 9 courts, pricing & 2 weeks of occupancy) to explore the app."
+          action={<button style={{ ...styles.primaryBtn, marginTop: 14 }} onClick={loadSample}>Load sample data</button>} />
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {master.venues.map(v => {
+          const vCourts = master.courts.filter(c => c.venueId === v.id);
+          const isOpen = expanded === v.id;
+          return (
+            <Card key={v.id} style={{ padding: 0, overflow: 'hidden' }}>
+              <div style={styles.venueRow} onClick={() => setExpanded(isOpen ? null : v.id)}>
+                <ChevronDown size={16} style={{ transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform .15s', flexShrink: 0 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontFamily: 'var(--font-display)', letterSpacing: '.01em' }}>{v.name}</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                    {v.city} · {v.district} · {v.province} · {vCourts.length} court{vCourts.length === 1 ? '' : 's'} · {v.type.replace('_', ' ')}
+                  </div>
+                </div>
+                <button style={styles.iconBtn} onClick={e => { e.stopPropagation(); setEditingVenue(v); }}><Edit2 size={14} /></button>
+                <button style={styles.iconBtn} onClick={e => { e.stopPropagation(); deleteVenue(v.id); }}><Trash2 size={14} /></button>
+              </div>
+              {isOpen && (
+                <div style={styles.venueBody}>
+                  {vCourts.length === 0 && <div style={styles.mutedNote}>No courts added yet.</div>}
+                  {vCourts.map(c => (
+                    <div key={c.id} style={styles.courtRow}>
+                      <CircleDot size={13} color="var(--court)" />
+                      <div style={{ flex: 1 }}>
+                        <b>{c.name}</b>
+                        <span style={{ color: 'var(--muted)', marginLeft: 8, fontSize: 12 }}>
+                          {c.surface} · {c.openOverride || 'venue hours'}–{c.closeOverride || ''}
+                        </span>
+                      </div>
+                      <button style={styles.iconBtnSm} onClick={() => setEditingCourt({ venueId: v.id, court: c })}><Edit2 size={12} /></button>
+                      <button style={styles.iconBtnSm} onClick={() => deleteCourt(c.id)}><Trash2 size={12} /></button>
+                    </div>
+                  ))}
+                  <button style={{ ...styles.ghostBtn, marginTop: 8 }} onClick={() => setEditingCourt({ venueId: v.id, court: 'new' })}>
+                    <Plus size={13} /> Add court
+                  </button>
+                </div>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+
+      {editingVenue && <VenueModal venue={editingVenue === 'new' ? null : editingVenue} onSave={saveVenue} onClose={() => setEditingVenue(null)} />}
+      {editingCourt && (
+        <CourtModal
+          court={editingCourt.court === 'new' ? null : editingCourt.court}
+          venueId={editingCourt.venueId}
+          existingCount={master.courts.filter(c => c.venueId === editingCourt.venueId).length}
+          onSave={saveCourt}
+          onClose={() => setEditingCourt(null)}
+        />
+      )}
+    </TabWrap>
+  );
+}
+
+function VenueModal({ venue, onSave, onClose }) {
+  const [f, setF] = useState(venue || {
+    id: uid('v'), name: '', country: 'Sri Lanka', province: PROVINCES[0], district: PROVINCE_DISTRICTS[PROVINCES[0]][0],
+    city: '', address: '', lat: '', lng: '', courtCount: 1, type: 'outdoor', openingTime: '06:00', closingTime: '22:00', active: true, notes: '',
+  });
+  const districts = PROVINCE_DISTRICTS[f.province] || [];
+
+  function set(k, v) { setF(prev => ({ ...prev, [k]: v })); }
+
+  return (
+    <Modal title={venue ? 'Edit venue' : 'Add venue'} onClose={onClose}>
+      <Field label="Venue name"><input style={styles.input} value={f.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Kitchen Line Colombo" /></Field>
+      <div style={styles.formRow}>
+        <Field label="Province"><Select value={f.province} onChange={v => { set('province', v); set('district', PROVINCE_DISTRICTS[v][0]); }} options={PROVINCES} /></Field>
+        <Field label="District"><Select value={f.district} onChange={v => set('district', v)} options={districts} /></Field>
+      </div>
+      <div style={styles.formRow}>
+        <Field label="City / Area"><input style={styles.input} value={f.city} onChange={e => set('city', e.target.value)} placeholder="e.g. Boralesgamuwa" /></Field>
+        <Field label="Venue type"><Select value={f.type} onChange={v => set('type', v)} options={VENUE_TYPES} /></Field>
+      </div>
+      <Field label="Address"><input style={styles.input} value={f.address} onChange={e => set('address', e.target.value)} /></Field>
+      <div style={styles.formRow}>
+        <Field label="Latitude (optional)"><input style={styles.input} value={f.lat} onChange={e => set('lat', e.target.value)} placeholder="6.8845" /></Field>
+        <Field label="Longitude (optional)"><input style={styles.input} value={f.lng} onChange={e => set('lng', e.target.value)} placeholder="79.8657" /></Field>
+      </div>
+      <div style={styles.formRow}>
+        <Field label="Opening time"><input type="time" style={styles.input} value={f.openingTime} onChange={e => set('openingTime', e.target.value)} /></Field>
+        <Field label="Closing time"><input type="time" style={styles.input} value={f.closingTime} onChange={e => set('closingTime', e.target.value)} /></Field>
+      </div>
+      <Field label="Notes"><textarea style={{ ...styles.input, minHeight: 60 }} value={f.notes} onChange={e => set('notes', e.target.value)} /></Field>
+      <ModalFooter onClose={onClose} onSave={() => f.name.trim() && onSave({ ...f, lat: parseFloat(f.lat) || null, lng: parseFloat(f.lng) || null })} disabled={!f.name.trim()} />
+    </Modal>
+  );
+}
+
+function CourtModal({ court, venueId, existingCount, onSave, onClose }) {
+  const [f, setF] = useState(court || {
+    id: uid('c'), venueId, name: `Court ${existingCount + 1}`, number: existingCount + 1,
+    type: 'standard', surface: 'acrylic', active: true, openOverride: '', closeOverride: '', notes: '',
+  });
+  function set(k, v) { setF(prev => ({ ...prev, [k]: v })); }
+  return (
+    <Modal title={court ? 'Edit court' : 'Add court'} onClose={onClose}>
+      <div style={styles.formRow}>
+        <Field label="Court name"><input style={styles.input} value={f.name} onChange={e => set('name', e.target.value)} /></Field>
+        <Field label="Surface"><Select value={f.surface} onChange={v => set('surface', v)} options={COURT_SURFACES} /></Field>
+      </div>
+      <div style={styles.formRow}>
+        <Field label="Opening override (optional)"><input type="time" style={styles.input} value={f.openOverride} onChange={e => set('openOverride', e.target.value)} /></Field>
+        <Field label="Closing override (optional)"><input type="time" style={styles.input} value={f.closeOverride} onChange={e => set('closeOverride', e.target.value)} /></Field>
+      </div>
+      <ModalFooter onClose={onClose} onSave={() => f.name.trim() && onSave(f)} disabled={!f.name.trim()} />
+    </Modal>
+  );
+}
+
+function Modal({ title, onClose, children }) {
+  return (
+    <div style={styles.modalOverlay} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={styles.modal}>
+        <div style={styles.modalHead}>
+          <div style={{ fontWeight: 800, fontFamily: 'var(--font-display)' }}>{title}</div>
+          <button style={styles.iconBtn} onClick={onClose}><X size={16} /></button>
+        </div>
+        <div style={styles.modalBody}>{children}</div>
+      </div>
+    </div>
+  );
+}
+function ModalFooter({ onClose, onSave, disabled }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+      <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+      <button style={{ ...styles.primaryBtn, opacity: disabled ? 0.5 : 1 }} disabled={disabled} onClick={onSave}>Save</button>
+    </div>
+  );
+}
+function Field({ label, children }) {
+  return (
+    <div style={{ marginBottom: 12, flex: 1 }}>
+      <div style={styles.fieldLabel}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+/* =========================================================================
+   PRICING TAB
+========================================================================= */
+
+function PricingTab({ ctx }) {
+  const { master, setMaster } = ctx;
+  const [venueId, setVenueId] = useState(master.venues[0]?.id || '');
+  const [courtId, setCourtId] = useState('');
+  const [editingRule, setEditingRule] = useState(null);
+
+  const venueCourts = master.courts.filter(c => c.venueId === venueId);
+  useEffect(() => { if (!venueCourts.some(c => c.id === courtId)) setCourtId(venueCourts[0]?.id || ''); }, [venueId]); // eslint-disable-line
+
+  const rules = master.pricing.filter(p => p.courtId === courtId).sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+  function saveRule(rule) {
+    const exists = master.pricing.some(p => p.id === rule.id);
+    const pricing = exists ? master.pricing.map(p => p.id === rule.id ? rule : p) : [...master.pricing, rule];
+    setMaster({ ...master, pricing });
+    setEditingRule(null);
+  }
+  function deleteRule(id) { setMaster({ ...master, pricing: master.pricing.filter(p => p.id !== id) }); }
+
+  if (master.venues.length === 0) {
+    return <TabWrap title="Pricing Rules" eyebrow="Peak / off-peak / special"><EmptyState icon={DollarSign} title="Add a venue first" body="Pricing rules attach to courts, so add a venue and at least one court before setting prices." /></TabWrap>;
+  }
+
+  return (
+    <TabWrap title="Pricing Rules" eyebrow="Peak / off-peak / special · historically preserved">
+      <div style={styles.filterRow}>
+        <Select value={venueId} onChange={setVenueId} options={master.venues.map(v => ({ value: v.id, label: v.name }))} />
+        <Select value={courtId} onChange={setCourtId} options={venueCourts.map(c => ({ value: c.id, label: c.name }))} placeholder={venueCourts.length ? undefined : 'No courts'} />
+        {courtId && <button style={styles.primaryBtn} onClick={() => setEditingRule('new')}><Plus size={14} /> Add rule</button>}
+      </div>
+
+      {courtId ? (
+        rules.length === 0 ? <div style={styles.mutedNote}>No pricing rules for this court yet.</div> : (
+          <table style={styles.table}>
+            <thead><tr>
+              <th style={styles.th}>Label</th><th style={styles.th}>Applies</th><th style={styles.th}>Time</th>
+              <th style={styles.th}>Category</th><th style={styles.th}>Price / hr</th><th style={styles.th}>Effective</th><th style={styles.th}></th>
+            </tr></thead>
+            <tbody>
+              {rules.map(r => (
+                <tr key={r.id}>
+                  <td style={styles.td}>{r.label || '—'}</td>
+                  <td style={styles.td}>{DAY_TYPE_OPTIONS.find(d => d.value === r.dayType)?.label}</td>
+                  <td style={{ ...styles.td, fontFamily: 'var(--font-mono)' }}>{r.startTime}–{r.endTime}</td>
+                  <td style={styles.td}><Badge tone={r.category}>{r.category.replace('_', ' ')}</Badge></td>
+                  <td style={{ ...styles.td, fontFamily: 'var(--font-mono)' }}>{fmtMoney(r.price)}</td>
+                  <td style={{ ...styles.td, fontFamily: 'var(--font-mono)', fontSize: 12 }}>{r.effectiveFrom || '—'} → {r.effectiveUntil || 'ongoing'}</td>
+                  <td style={styles.td}>
+                    <button style={styles.iconBtnSm} onClick={() => setEditingRule(r)}><Edit2 size={12} /></button>
+                    <button style={styles.iconBtnSm} onClick={() => deleteRule(r.id)}><Trash2 size={12} /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )
+      ) : <div style={styles.mutedNote}>Add a court to this venue first.</div>}
+
+      {editingRule && (
+        <PricingModal rule={editingRule === 'new' ? null : editingRule} courtId={courtId} onSave={saveRule} onClose={() => setEditingRule(null)} />
+      )}
+    </TabWrap>
+  );
+}
+
+function PricingModal({ rule, courtId, onSave, onClose }) {
+  const [f, setF] = useState(rule || {
+    id: uid('pr'), courtId, dayType: 'weekday', startTime: '06:00', endTime: '16:00',
+    price: 2500, category: 'off_peak', effectiveFrom: todayStr(), effectiveUntil: '', label: '',
+  });
+  function set(k, v) { setF(prev => ({ ...prev, [k]: v })); }
+  return (
+    <Modal title={rule ? 'Edit pricing rule' : 'Add pricing rule'} onClose={onClose}>
+      <Field label="Label (optional)"><input style={styles.input} value={f.label} onChange={e => set('label', e.target.value)} placeholder="e.g. Weekday evening peak" /></Field>
+      <div style={styles.formRow}>
+        <Field label="Applies to"><Select value={f.dayType} onChange={v => set('dayType', v)} options={DAY_TYPE_OPTIONS} /></Field>
+        <Field label="Category"><Select value={f.category} onChange={v => set('category', v)} options={PRICING_CATEGORIES} /></Field>
+      </div>
+      <div style={styles.formRow}>
+        <Field label="Start time"><input type="time" style={styles.input} value={f.startTime} onChange={e => set('startTime', e.target.value)} /></Field>
+        <Field label="End time"><input type="time" style={styles.input} value={f.endTime} onChange={e => set('endTime', e.target.value)} /></Field>
+      </div>
+      <Field label="Price per hour (Rs)"><input type="number" style={styles.input} value={f.price} onChange={e => set('price', parseFloat(e.target.value) || 0)} /></Field>
+      <div style={styles.formRow}>
+        <Field label="Effective from"><input type="date" style={styles.input} value={f.effectiveFrom} onChange={e => set('effectiveFrom', e.target.value)} /></Field>
+        <Field label="Effective until (optional)"><input type="date" style={styles.input} value={f.effectiveUntil} onChange={e => set('effectiveUntil', e.target.value)} /></Field>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: -4, marginBottom: 8 }}>
+        <Info size={11} style={{ verticalAlign: '-1px', marginRight: 4 }} />
+        Leave "effective until" blank for an ongoing rate. Changing a price later doesn't rewrite history — set a new effective date instead.
+      </div>
+      <ModalFooter onClose={onClose} onSave={() => onSave(f)} disabled={!f.price} />
+    </Modal>
+  );
+}
+
+/* =========================================================================
+   OCCUPANCY ENTRY TAB
+========================================================================= */
+
+function OccupancyTab({ ctx }) {
+  const { master, occData, persistOccMonth } = ctx;
+  const [venueId, setVenueId] = useState(master.venues[0]?.id || '');
+  const [courtId, setCourtId] = useState('');
+  const [date, setDate] = useState(todayStr());
+
+  const venue = master.venues.find(v => v.id === venueId);
+  const venueCourts = master.courts.filter(c => c.venueId === venueId);
+  useEffect(() => { if (!venueCourts.some(c => c.id === courtId)) setCourtId(venueCourts[0]?.id || ''); }, [venueId]); // eslint-disable-line
+  const court = master.courts.find(c => c.id === courtId);
+
+  const monthKey = monthKeyOf(date);
+  const hours = (occData[monthKey]?.[courtId]?.[date]) || (court && venue ? defaultHourStates(...Object.values(courtHours(court, venue))) : []);
+
+  function cycleState(h) {
+    if (!court) return;
+    const next = hours.map((x, i) => {
+      if (i !== h) return x;
+      const order = ['closed', 'available', 'occupied'];
+      const idx = order.indexOf(x.state);
+      const nextState = order[(idx + 1) % order.length];
+      let price = x.price, category = x.category;
+      if (nextState === 'occupied') {
+        const rule = matchPricingRule(master.pricing, courtId, date, h);
+        price = rule ? rule.price : x.price;
+        category = rule ? rule.category : x.category;
+      }
+      return { state: nextState, price, category };
+    });
+    const monthData = { ...(occData[monthKey] || {}) };
+    monthData[courtId] = { ...(monthData[courtId] || {}), [date]: next };
+    persistOccMonth(monthKey, monthData);
+  }
+
+  function resetDay() {
+    if (!court || !venue) return;
+    if (!confirm('Reset this day to default open/closed hours? Any bookings logged for it will be lost.')) return;
+    const fresh = defaultHourStates(...Object.values(courtHours(court, venue)));
+    const monthData = { ...(occData[monthKey] || {}) };
+    monthData[courtId] = { ...(monthData[courtId] || {}), [date]: fresh };
+    persistOccMonth(monthKey, monthData);
+  }
+
+  const dayAgg = (() => {
+    const avail = hours.filter(h => h.state !== 'closed').length;
+    const occ = hours.filter(h => h.state === 'occupied').length;
+    const rev = hours.filter(h => h.state === 'occupied').reduce((s, h) => s + (h.price || 0), 0);
+    return { avail, occ, rev, pct: safeDiv(occ, avail) * 100 };
+  })();
+
+  if (master.venues.length === 0) {
+    return <TabWrap title="Log Occupancy" eyebrow="One court × one date × 24 hours"><EmptyState icon={CircleDot} title="Add a venue first" body="You need at least one venue and court before logging hourly occupancy." /></TabWrap>;
+  }
+
+  return (
+    <TabWrap title="Log Occupancy" eyebrow="One court × one date × 24 hourly slots">
+      <div style={styles.filterRow}>
+        <Select value={venueId} onChange={setVenueId} options={master.venues.map(v => ({ value: v.id, label: v.name }))} />
+        <Select value={courtId} onChange={setCourtId} options={venueCourts.map(c => ({ value: c.id, label: c.name }))} placeholder={venueCourts.length ? undefined : 'No courts'} />
+        <input type="date" style={styles.input} value={date} onChange={e => setDate(e.target.value)} />
+        <button style={styles.ghostBtn} onClick={resetDay}><RefreshCw size={13} /> Reset day</button>
+      </div>
+
+      {!court ? <div style={styles.mutedNote}>Add a court to this venue first.</div> : (
+        <>
+          <div style={styles.legendRow}>
+            <LegendDot color="var(--border)" label="Closed (tap to open)" />
+            <LegendDot color="#BFE0CC" label="Available" />
+            <LegendDot color="var(--court)" label="Occupied" />
+          </div>
+
+          <div style={styles.hourGrid}>
+            {hours.map((h, i) => (
+              <button key={i} onClick={() => cycleState(i)} style={{
+                ...styles.hourCell,
+                background: h.state === 'closed' ? 'var(--bg)' : h.state === 'occupied' ? 'var(--court)' : '#BFE0CC',
+                borderColor: h.state === 'closed' ? 'var(--border)' : 'transparent',
+                color: h.state === 'occupied' ? '#fff' : 'var(--ink)',
+              }}>
+                <span style={{ fontSize: 11, fontWeight: 700 }}>{hourLabel(i)}</span>
+                {h.state === 'occupied' && h.price != null && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', opacity: 0.9 }}>{fmtMoney(h.price)}</span>}
+                {h.state !== 'closed' && h.category && <span style={{ fontSize: 8, opacity: 0.75, textTransform: 'uppercase' }}>{h.category.replace('_', ' ')}</span>}
+              </button>
+            ))}
+          </div>
+
+          <div style={styles.statGrid}>
+            <StatBlock label="Available hrs" value={dayAgg.avail} />
+            <StatBlock label="Occupied hrs" value={dayAgg.occ} />
+            <StatBlock label="Occupancy" value={fmtPct(dayAgg.pct)} accent="var(--court)" />
+            <StatBlock label="Est. revenue" value={fmtMoney(dayAgg.rev)} accent="var(--ball-dark)" />
+          </div>
+        </>
+      )}
+    </TabWrap>
+  );
+}
+
+function LegendDot({ color, label }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
+      <span style={{ width: 12, height: 12, borderRadius: 3, background: color, border: '1px solid var(--border)' }} />
+      {label}
+    </div>
+  );
+}
+
+/* =========================================================================
+   HEATMAP TAB
+========================================================================= */
+
+function HeatmapTab({ ctx }) {
+  const { master, flatRows } = ctx;
+  const [province, setProvince] = useState('');
+  const [district, setDistrict] = useState('');
+  const [city, setCity] = useState('');
+  const [venueId, setVenueId] = useState('');
+  const [days, setDays] = useState(60);
+
+  const districts = province ? PROVINCE_DISTRICTS[province] : [...new Set(master.venues.map(v => v.district))];
+  const cities = [...new Set(master.venues.filter(v => (!province || v.province === province) && (!district || v.district === district)).map(v => v.city))];
+  const venueOptions = master.venues.filter(v => (!province || v.province === province) && (!district || v.district === district) && (!city || v.city === city));
+
+  const since = addDaysStr(todayStr(), -days);
+  let rows = flatRows.filter(r => r.date >= since);
+  if (province) rows = rows.filter(r => r.province === province);
+  if (district) rows = rows.filter(r => r.district === district);
+  if (city) rows = rows.filter(r => r.city === city);
+  if (venueId) rows = rows.filter(r => r.venueId === venueId);
+
+  // grid[dayIdx][hour] = { occ, avail }
+  const grid = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => ({ occ: 0, avail: 0 })));
+  rows.forEach(r => {
+    const dow = dateToDow(r.date); // 0=Sun..6=Sat
+    const colIdx = DAY_SHORT_IDX.indexOf(dow); // position within Mon..Sun
+    grid[colIdx][r.hour].avail++;
+    if (r.occupied) grid[colIdx][r.hour].occ++;
+  });
+
+  return (
+    <TabWrap title="24 × 7 Hotspot Heatmap" eyebrow="Occupied ÷ available court-hours">
+      <div style={styles.filterRow}>
+        <Select value={province} onChange={v => { setProvince(v); setDistrict(''); setCity(''); setVenueId(''); }} placeholder="All provinces" options={PROVINCES} />
+        <Select value={district} onChange={v => { setDistrict(v); setCity(''); setVenueId(''); }} placeholder="All districts" options={districts} />
+        <Select value={city} onChange={v => { setCity(v); setVenueId(''); }} placeholder="All cities" options={cities} />
+        <Select value={venueId} onChange={setVenueId} placeholder="All venues" options={venueOptions.map(v => ({ value: v.id, label: v.name }))} />
+        <Select value={String(days)} onChange={v => setDays(Number(v))} options={[{ value: '14', label: 'Last 14 days' }, { value: '30', label: 'Last 30 days' }, { value: '60', label: 'Last 60 days' }, { value: '90', label: 'Last 90 days' }]} />
+      </div>
+
+      {rows.length === 0 ? (
+        <div style={styles.mutedNote}>No occupancy data logged for this scope / date range yet.</div>
+      ) : (
+        <Card>
+          <div style={styles.heatmapWrap}>
+            <div style={styles.heatmapGrid}>
+              <div />
+              {DAY_SHORT.map(d => <div key={d} style={styles.heatmapColHead}>{d}</div>)}
+              {Array.from({ length: 24 }, (_, h) => (
+                <React.Fragment key={h}>
+                  <div style={styles.heatmapRowHead}>{hourLabel(h)}</div>
+                  {DAY_SHORT.map((d, colIdx) => {
+                    const cell = grid[colIdx][h];
+                    const pct = cell.avail > 0 ? safeDiv(cell.occ, cell.avail) * 100 : null;
+                    const lvl = pct != null ? hotspotFor(pct) : null;
+                    return (
+                      <div key={d + h} title={`${d} ${hourLabel(h)}: ${pct != null ? fmtPct(pct) : 'no data'}`}
+                        style={{ ...styles.heatCell, background: lvl ? lvl.color : '#F1F1EE', opacity: pct == null ? 0.4 : 1 }}>
+                        {pct != null && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: lvl.max > 60 ? '#fff' : 'var(--ink)' }}>{Math.round(pct)}</span>}
+                      </div>
+                    );
+                  })}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+          <div style={styles.legendRowWrap}>
+            {HOTSPOT_LEVELS.map(l => (
+              <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--muted)' }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: l.color }} /> {l.label}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </TabWrap>
+  );
+}
+
+/* =========================================================================
+   RANKINGS TAB
+========================================================================= */
+
+function RankingsTab({ ctx }) {
+  const { master, flatRows, aggregate } = ctx;
+  const [days, setDays] = useState(30);
+  const [metric, setMetric] = useState('occupancyPct');
+
+  const since = addDaysStr(todayStr(), -days);
+  const rows = flatRows.filter(r => r.date >= since);
+
+  const byVenue = groupAndAggregate(rows, r => r.venueName, aggregate)
+    .filter(r => r.availableHours > 0).sort((a, b) => b[metric] - a[metric]);
+  const byCity = groupAndAggregate(rows, r => r.city, aggregate)
+    .filter(r => r.availableHours > 0).sort((a, b) => b[metric] - a[metric]);
+
+  const metricOptions = [
+    { value: 'occupancyPct', label: 'Occupancy %' },
+    { value: 'revenue', label: 'Estimated revenue' },
+    { value: 'revpah', label: 'RevPAH' },
+    { value: 'occupiedHours', label: 'Occupied court-hours' },
+  ];
+  const fmt = (v, key) => key === 'occupancyPct' ? fmtPct(v) : key === 'revenue' || key === 'revpah' ? fmtMoney(v) : v.toLocaleString();
+
+  return (
+    <TabWrap title="Rankings" eyebrow="Venues & cities">
+      <div style={styles.filterRow}>
+        <Select value={String(days)} onChange={v => setDays(Number(v))} options={[{ value: '7', label: 'Last 7 days' }, { value: '30', label: 'Last 30 days' }, { value: '90', label: 'Last 90 days' }]} />
+        <Select value={metric} onChange={setMetric} options={metricOptions} />
+      </div>
+
+      {rows.length === 0 ? <div style={styles.mutedNote}>No occupancy data logged for this range yet.</div> : (
+        <div style={styles.twoCol}>
+          <Card eyebrow="Venue leaderboard" title="Top venues">
+            <RankList rows={byVenue} metric={metric} fmt={fmt} />
+          </Card>
+          <Card eyebrow="City leaderboard" title="Top cities">
+            <RankList rows={byCity} metric={metric} fmt={fmt} />
+          </Card>
+        </div>
+      )}
+    </TabWrap>
+  );
+}
+
+function RankList({ rows, metric, fmt }) {
+  if (rows.length === 0) return <div style={styles.mutedNote}>No data.</div>;
+  const max = Math.max(...rows.map(r => r[metric]), 1);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {rows.slice(0, 10).map((r, i) => (
+        <div key={r.key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={styles.rankNum}>{i + 1}</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+              <span style={{ fontWeight: 700 }}>{r.key}</span>
+              <span style={{ fontFamily: 'var(--font-mono)' }}>{fmt(r[metric], metric)}</span>
+            </div>
+            <div style={styles.miniBarTrack}>
+              <div style={{ ...styles.miniBarFill, width: `${Math.max(3, (r[metric] / max) * 100)}%` }} />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* =========================================================================
+   CALENDAR TAB
+========================================================================= */
+
+function CalendarTab({ ctx }) {
+  const { master, setMaster } = ctx;
+  const [date, setDate] = useState(todayStr());
+  const [type, setType] = useState('poya');
+  const [name, setName] = useState('');
+
+  function addSpecialDay() {
+    if (!date) return;
+    const specialDays = { ...master.specialDays, [date]: { type, name: name.trim() } };
+    setMaster({ ...master, specialDays });
+    setName('');
+  }
+  function removeSpecialDay(d) {
+    const specialDays = { ...master.specialDays };
+    delete specialDays[d];
+    setMaster({ ...master, specialDays });
+  }
+
+  const entries = Object.entries(master.specialDays).sort((a, b) => b[0].localeCompare(a[0]));
+
+  return (
+    <TabWrap title="Calendar" eyebrow="Poya days, public holidays & special events">
+      <Card title="Add a special day">
+        <div style={styles.formRow}>
+          <Field label="Date"><input type="date" style={styles.input} value={date} onChange={e => setDate(e.target.value)} /></Field>
+          <Field label="Type"><Select value={type} onChange={setType} options={SPECIAL_DAY_TYPES} /></Field>
+        </div>
+        <Field label="Name (optional)"><input style={styles.input} value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Vesak Poya" /></Field>
+        <button style={styles.primaryBtn} onClick={addSpecialDay}><Plus size={14} /> Add to calendar</button>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
+          Weekday / weekend is detected automatically from the date. Mark Poya days and public holidays here so occupancy on those dates can be compared against normal days.
+        </div>
+      </Card>
+
+      <Card title="Marked days" style={{ marginTop: 16 }}>
+        {entries.length === 0 ? <div style={styles.mutedNote}>No special days marked yet.</div> : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {entries.map(([d, info]) => (
+              <div key={d} style={{ display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid var(--border)', paddingBottom: 8 }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, width: 100 }}>{d}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', width: 90 }}>{DAY_NAMES[dateToDow(d)]}</div>
+                <Badge tone={info.type}>{SPECIAL_DAY_TYPES.find(t => t.value === info.type)?.label}</Badge>
+                <div style={{ flex: 1, fontSize: 13 }}>{info.name}</div>
+                <button style={styles.iconBtnSm} onClick={() => removeSpecialDay(d)}><Trash2 size={12} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </TabWrap>
+  );
+}
+
+/* =========================================================================
+   STYLES
+========================================================================= */
+
+const GLOBAL_CSS = `
+  :root {
+    --bg: #F3F6F4;
+    --ink: #16241F;
+    --court: #235E73;
+    --court-dark: #163F4E;
+    --ball: #E7C548;
+    --ball-dark: #A47F12;
+    --muted: #6B7A75;
+    --border: #DCE3DF;
+    --card: #FFFFFF;
+    --danger: #B8503F;
+    --font-display: 'Arial Narrow', 'Helvetica Neue', Arial, sans-serif;
+    --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  input, select, textarea, button { font-family: var(--font-body); }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--court); outline-offset: 1px; }
+  button:focus-visible { outline: 2px solid var(--court); outline-offset: 2px; }
+  ::placeholder { color: #9DAAA5; }
+`;
+
+const styles = {
+  app: { display: 'flex', minHeight: '100%', background: 'var(--bg)', fontFamily: 'var(--font-body)', color: 'var(--ink)' },
+  loadingWrap: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 400, color: 'var(--court)', fontFamily: 'var(--font-body)' },
+
+  sidebar: { width: 232, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', padding: '18px 14px', background: '#FBFCFB' },
+  brand: { display: 'flex', alignItems: 'center', gap: 10, padding: '4px 6px 18px', borderBottom: '2px solid var(--ink)', marginBottom: 14 },
+  brandBall: { width: 18, height: 18, borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%, #F3DB7C, var(--ball))', flexShrink: 0, boxShadow: 'inset -2px -2px 0 rgba(0,0,0,0.12)' },
+  brandTitle: { fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 15, letterSpacing: '.06em', lineHeight: 1 },
+  brandSub: { fontSize: 10, color: 'var(--muted)', marginTop: 3, letterSpacing: '.01em' },
+  nav: { display: 'flex', flexDirection: 'column', gap: 2, flex: 1 },
+  navBtn: { display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--ink)', fontSize: 13, fontWeight: 600, textAlign: 'left', cursor: 'pointer' },
+  navBtnActive: { background: 'var(--ink)', color: '#fff' },
+  sidebarFoot: { borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 10 },
+
+  main: { flex: 1, padding: '26px 34px 60px', minWidth: 0, overflowX: 'auto' },
+  tabHeader: { display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20, gap: 12, flexWrap: 'wrap' },
+  eyebrow: { fontSize: 11, textTransform: 'uppercase', letterSpacing: '.09em', color: 'var(--court)', fontWeight: 700, marginBottom: 4 },
+  h1: { fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 800, letterSpacing: '.01em', margin: 0 },
+
+  statGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 20 },
+  statBlock: { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px' },
+  statLabel: { fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--muted)', fontWeight: 700 },
+  statValue: { fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 700, marginTop: 6 },
+  statSub: { fontSize: 11, color: 'var(--muted)', marginTop: 3 },
+
+  twoCol: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 },
+  card: { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 18, marginBottom: 0 },
+  cardHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
+  cardTitle: { fontWeight: 800, fontSize: 15, fontFamily: 'var(--font-display)' },
+
+  compareRow: { display: 'flex', gap: 24 },
+  barTrack: { height: 8, background: '#EDF1EF', borderRadius: 6, overflow: 'hidden' },
+  barFill: { height: '100%', borderRadius: 6 },
+
+  filterRow: { display: 'flex', gap: 10, marginBottom: 18, flexWrap: 'wrap' },
+  input: { border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', fontSize: 13, background: '#fff', color: 'var(--ink)', minWidth: 0 },
+
+  table: { width: '100%', borderCollapse: 'collapse', fontSize: 13 },
+  th: { textAlign: 'left', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--muted)', padding: '6px 10px', borderBottom: '2px solid var(--ink)' },
+  td: { padding: '9px 10px', borderBottom: '1px solid var(--border)' },
+  mutedNote: { color: 'var(--muted)', fontSize: 13, padding: '18px 4px' },
+
+  miniBarTrack: { flex: 1, height: 6, background: '#EDF1EF', borderRadius: 4, overflow: 'hidden', minWidth: 60 },
+  miniBarFill: { height: '100%', background: 'var(--court)', borderRadius: 4 },
+
+  emptyState: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 20px', background: 'var(--card)', border: '1px dashed var(--border)', borderRadius: 14, textAlign: 'center' },
+
+  primaryBtn: { display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--ink)', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer' },
+  ghostBtn: { display: 'inline-flex', alignItems: 'center', gap: 6, background: 'transparent', color: 'var(--ink)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 13px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
+  iconBtn: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, border: '1px solid var(--border)', borderRadius: 7, background: '#fff', cursor: 'pointer' },
+  iconBtnSm: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, border: '1px solid var(--border)', borderRadius: 6, background: '#fff', cursor: 'pointer', marginLeft: 4 },
+
+  venueRow: { display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', cursor: 'pointer' },
+  venueBody: { padding: '0 16px 16px 40px', borderTop: '1px solid var(--border)' },
+  courtRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '9px 0', borderBottom: '1px solid var(--border)' },
+
+  formRow: { display: 'flex', gap: 12 },
+  fieldLabel: { fontSize: 11.5, fontWeight: 700, color: 'var(--muted)', marginBottom: 5 },
+
+  modalOverlay: { position: 'fixed', inset: 0, background: 'rgba(22,36,31,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 20 },
+  modal: { background: '#fff', borderRadius: 14, width: 480, maxWidth: '100%', maxHeight: '88vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.25)' },
+  modalHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)' },
+  modalBody: { padding: 20 },
+
+  legendRow: { display: 'flex', gap: 18, marginBottom: 14 },
+  legendRowWrap: { display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 12 },
+  hourGrid: { display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8, marginBottom: 22 },
+  hourCell: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, height: 58, borderRadius: 8, border: '1px solid', cursor: 'pointer' },
+
+  heatmapWrap: { overflowX: 'auto' },
+  heatmapGrid: { display: 'grid', gridTemplateColumns: '54px repeat(7, 42px)', gap: 3, alignItems: 'center' },
+  heatmapColHead: { fontSize: 11, fontWeight: 800, textAlign: 'center', color: 'var(--muted)', paddingBottom: 4 },
+  heatmapRowHead: { fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--font-mono)', textAlign: 'right', paddingRight: 6 },
+  heatCell: { height: 20, borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+
+  rankNum: { width: 22, height: 22, borderRadius: '50%', background: '#EDF1EF', color: 'var(--muted)', fontSize: 11, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+};
+
+const rootEl = document.getElementById('root');
+ReactDOM.createRoot(rootEl).render(<App />);
+
+
+</script>
+</body>
+</html>
