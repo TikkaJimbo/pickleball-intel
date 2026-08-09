@@ -1144,7 +1144,10 @@ function PricingTab({ ctx }) {
     const kept = master.pricing.filter(p => !(venueCourtIds.has(p.courtId) && p.quickSetup));
     const rows = [
       { dayType: 'weekday', startTime: form.offPeakStart, endTime: form.offPeakEnd, price: form.offPeakPrice, category: 'off_peak', label: 'Weekday off-peak' },
-      { dayType: 'weekday', startTime: form.peakStart, endTime: form.peakEnd, price: form.peakPrice, category: 'peak', label: 'Weekday peak' },
+      ...form.peakSlots.map((s, i) => ({
+        dayType: 'weekday', startTime: s.start, endTime: s.end, price: form.peakPrice, category: 'peak',
+        label: form.peakSlots.length > 1 ? `Weekday peak (slot ${i + 1})` : 'Weekday peak',
+      })),
       { dayType: 'weekend', startTime: '00:00', endTime: '23:59', price: form.peakPrice, category: 'peak', label: 'Weekend (all day, peak rate)' },
     ];
     const added = [];
@@ -1227,17 +1230,36 @@ function PricingTab({ ctx }) {
 
 function QuickPricingModal({ existingRules, venueCourtCount, onSave, onClose }) {
   const offPeakRule = existingRules.find(r => r.category === 'off_peak' && r.dayType === 'weekday');
-  const peakRule = existingRules.find(r => r.category === 'peak' && r.dayType === 'weekday');
+  const peakRules = existingRules.filter(r => r.category === 'peak' && r.dayType === 'weekday');
+  // dedupe to one entry per slot (same slot is duplicated across every court)
+  const peakSlotMap = {};
+  peakRules.forEach(r => { peakSlotMap[r.ruleGroupId || r.id] = r; });
+  const dedupedPeakRules = Object.values(peakSlotMap).sort((a, b) => a.startTime.localeCompare(b.startTime));
+  const initialPeakSlots = dedupedPeakRules.length
+    ? dedupedPeakRules.map(r => ({ start: r.startTime, end: r.endTime }))
+    : [{ start: '16:00', end: '23:59' }];
+
   const [f, setF] = useState({
     offPeakPrice: offPeakRule?.price ?? 2500,
     offPeakStart: offPeakRule?.startTime ?? '06:00',
     offPeakEnd: offPeakRule?.endTime ?? '16:00',
-    peakPrice: peakRule?.price ?? 3500,
-    peakStart: peakRule?.startTime ?? '16:00',
-    peakEnd: peakRule?.endTime ?? '23:59',
+    peakPrice: dedupedPeakRules[0]?.price ?? 3500,
+    peakSlots: initialPeakSlots,
     effectiveFrom: offPeakRule?.effectiveFrom || todayStr(),
   });
   function set(k, v) { setF(prev => ({ ...prev, [k]: v })); }
+  function setSlot(i, field, value) {
+    setF(prev => {
+      const slots = prev.peakSlots.map((s, idx) => idx === i ? { ...s, [field]: value } : s);
+      return { ...prev, peakSlots: slots };
+    });
+  }
+  function addSlot() {
+    setF(prev => ({ ...prev, peakSlots: [...prev.peakSlots, { start: '06:00', end: '09:00' }] }));
+  }
+  function removeSlot(i) {
+    setF(prev => ({ ...prev, peakSlots: prev.peakSlots.filter((_, idx) => idx !== i) }));
+  }
 
   return (
     <Modal title="Quick setup: peak / off-peak pricing" onClose={onClose}>
@@ -1257,9 +1279,27 @@ function QuickPricingModal({ existingRules, venueCourtCount, onSave, onClose }) 
       <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 14, marginBottom: 14 }}>
         <div style={{ fontWeight: 800, fontSize: 12.5, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--muted)' }}>Weekday peak</div>
         <Field label="Peak price per hour (Rs)"><input type="number" style={styles.input} value={f.peakPrice} onChange={e => set('peakPrice', parseFloat(e.target.value) || 0)} /></Field>
-        <div style={styles.formRow}>
-          <Field label="From"><input type="time" style={styles.input} value={f.peakStart} onChange={e => set('peakStart', e.target.value)} /></Field>
-          <Field label="To"><input type="time" style={styles.input} value={f.peakEnd} onChange={e => set('peakEnd', e.target.value)} /></Field>
+
+        {f.peakSlots.map((slot, i) => (
+          <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginBottom: 4 }}>
+            <div style={styles.formRow}>
+              <Field label={f.peakSlots.length > 1 ? `Slot ${i + 1} — From` : 'From'}>
+                <input type="time" style={styles.input} value={slot.start} onChange={e => setSlot(i, 'start', e.target.value)} />
+              </Field>
+              <Field label={f.peakSlots.length > 1 ? `Slot ${i + 1} — To` : 'To'}>
+                <input type="time" style={styles.input} value={slot.end} onChange={e => setSlot(i, 'end', e.target.value)} />
+              </Field>
+            </div>
+            {f.peakSlots.length > 1 && (
+              <button style={{ ...styles.iconBtnSm, marginBottom: 12 }} onClick={() => removeSlot(i)} title="Remove this slot"><X size={12} /></button>
+            )}
+          </div>
+        ))}
+        <button style={{ ...styles.ghostBtn, marginTop: 6 }} onClick={addSlot}>
+          <Plus size={13} /> Add another peak time slot
+        </button>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
+          e.g. an early-morning peak and a separate evening peak — both priced at the same peak rate above.
         </div>
       </div>
 
