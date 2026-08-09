@@ -286,10 +286,19 @@ function buildSampleData() {
     }
   });
   const pricing = [];
-  courts.forEach(c => {
-    pricing.push({ id: uid('pr'), courtId: c.id, dayType: 'weekday', startTime: '06:00', endTime: '16:00', price: 2500, category: 'off_peak', effectiveFrom: '2026-01-01', effectiveUntil: '', label: 'Weekday off-peak' });
-    pricing.push({ id: uid('pr'), courtId: c.id, dayType: 'weekday', startTime: '16:00', endTime: '23:59', price: 3500, category: 'peak', effectiveFrom: '2026-01-01', effectiveUntil: '', label: 'Weekday evening peak' });
-    pricing.push({ id: uid('pr'), courtId: c.id, dayType: 'weekend', startTime: '06:00', endTime: '23:59', price: 3500, category: 'peak', effectiveFrom: '2026-01-01', effectiveUntil: '', label: 'Weekend peak' });
+  venues.forEach(v => {
+    const vCourts = courts.filter(c => c.venueId === v.id);
+    const rows = [
+      { dayType: 'weekday', startTime: '06:00', endTime: '16:00', price: 2500, category: 'off_peak', label: 'Weekday off-peak' },
+      { dayType: 'weekday', startTime: '16:00', endTime: '23:59', price: 3500, category: 'peak', label: 'Weekday evening peak' },
+      { dayType: 'weekend', startTime: '06:00', endTime: '23:59', price: 3500, category: 'peak', label: 'Weekend peak' },
+    ];
+    rows.forEach(row => {
+      const groupId = uid('rg');
+      vCourts.forEach(c => {
+        pricing.push({ id: uid('pr'), courtId: c.id, ruleGroupId: groupId, effectiveFrom: '2026-01-01', effectiveUntil: '', ...row });
+      });
+    });
   });
 
   const specialDays = {};
@@ -1087,85 +1096,166 @@ function Field({ label, children }) {
 function PricingTab({ ctx }) {
   const { master, setMaster } = ctx;
   const [venueId, setVenueId] = useState(master.venues[0]?.id || '');
-  const [courtId, setCourtId] = useState('');
-  const [editingRule, setEditingRule] = useState(null);
+  const [editingGroup, setEditingGroup] = useState(null); // null | 'new' | groupObject
 
   const venueCourts = master.courts.filter(c => c.venueId === venueId);
-  useEffect(() => { if (!venueCourts.some(c => c.id === courtId)) setCourtId(venueCourts[0]?.id || ''); }, [venueId]); // eslint-disable-line
+  const venueCourtIds = new Set(venueCourts.map(c => c.id));
+  const courtNameOf = (id) => venueCourts.find(c => c.id === id)?.name || '—';
 
-  const rules = master.pricing.filter(p => p.courtId === courtId).sort((a, b) => a.startTime.localeCompare(b.startTime));
+  // group rules that were created together (same ruleGroupId) so a venue-wide
+  // rule shows as ONE row, not one row per court
+  const groups = useMemo(() => {
+    const rulesInVenue = master.pricing.filter(p => venueCourtIds.has(p.courtId));
+    const byKey = {};
+    rulesInVenue.forEach(p => {
+      const key = p.ruleGroupId || p.id;
+      if (!byKey[key]) byKey[key] = { key, courtIds: [], sample: p };
+      byKey[key].courtIds.push(p.courtId);
+    });
+    return Object.values(byKey).sort((a, b) => (a.sample.startTime || '').localeCompare(b.sample.startTime || ''));
+  }, [master.pricing, venueId, master.courts]); // eslint-disable-line
 
-  function saveRule(rule) {
-    const exists = master.pricing.some(p => p.id === rule.id);
-    const pricing = exists ? master.pricing.map(p => p.id === rule.id ? rule : p) : [...master.pricing, rule];
-    setMaster({ ...master, pricing });
-    setEditingRule(null);
+  function saveGroup(form, existingKey) {
+    let pricing = master.pricing;
+    if (existingKey) pricing = pricing.filter(p => (p.ruleGroupId || p.id) !== existingKey);
+    const base = {
+      label: form.label, dayType: form.dayType, startTime: form.startTime, endTime: form.endTime,
+      price: form.price, category: form.category, effectiveFrom: form.effectiveFrom, effectiveUntil: form.effectiveUntil,
+    };
+    let added;
+    if (form.applyMode === 'venue') {
+      const groupId = uid('rg');
+      added = venueCourts.map(c => ({ id: uid('pr'), courtId: c.id, ruleGroupId: groupId, ...base }));
+    } else {
+      added = [{ id: uid('pr'), courtId: form.singleCourtId, ruleGroupId: null, ...base }];
+    }
+    setMaster({ ...master, pricing: [...pricing, ...added] });
+    setEditingGroup(null);
   }
-  function deleteRule(id) { setMaster({ ...master, pricing: master.pricing.filter(p => p.id !== id) }); }
+  function deleteGroup(key) {
+    setMaster({ ...master, pricing: master.pricing.filter(p => (p.ruleGroupId || p.id) !== key) });
+  }
 
   if (master.venues.length === 0) {
-    return <TabWrap title="Pricing Rules" eyebrow="Peak / off-peak / special"><EmptyState icon={DollarSign} title="Add a venue first" body="Pricing rules attach to courts, so add a venue and at least one court before setting prices." /></TabWrap>;
+    return <TabWrap title="Pricing" eyebrow="Peak / off-peak / special"><EmptyState icon={DollarSign} title="Add a venue first" body="Set pricing once you've added a venue and at least one court." /></TabWrap>;
   }
 
   return (
-    <TabWrap title="Pricing Rules" eyebrow="Peak / off-peak / special · historically preserved">
+    <TabWrap title="Pricing" eyebrow="Set once per venue · historically preserved">
       <div style={styles.filterRow}>
         <Select value={venueId} onChange={setVenueId} options={master.venues.map(v => ({ value: v.id, label: v.name }))} />
-        <Select value={courtId} onChange={setCourtId} options={venueCourts.map(c => ({ value: c.id, label: c.name }))} placeholder={venueCourts.length ? undefined : 'No courts'} />
-        {courtId && <button style={styles.primaryBtn} onClick={() => setEditingRule('new')}><Plus size={14} /> Add rule</button>}
+        {venueCourts.length > 0 && <button style={styles.primaryBtn} onClick={() => setEditingGroup('new')}><Plus size={14} /> Add pricing rule</button>}
       </div>
 
-      {courtId ? (
-        rules.length === 0 ? <div style={styles.mutedNote}>No pricing rules for this court yet.</div> : (
+      {venueCourts.length === 0 ? <div style={styles.mutedNote}>Add a court to this venue first (Venues &amp; Courts tab).</div> : (
+        groups.length === 0 ? <div style={styles.mutedNote}>No pricing set for this venue yet. Add a rule — by default it covers all {venueCourts.length} court{venueCourts.length === 1 ? '' : 's'} here.</div> : (
           <table style={styles.table}>
             <thead><tr>
               <th style={styles.th}>Label</th><th style={styles.th}>Applies</th><th style={styles.th}>Time</th>
-              <th style={styles.th}>Category</th><th style={styles.th}>Price / hr</th><th style={styles.th}>Effective</th><th style={styles.th}></th>
+              <th style={styles.th}>Category</th><th style={styles.th}>Price / hr</th><th style={styles.th}>Courts</th>
+              <th style={styles.th}>Effective</th><th style={styles.th}></th>
             </tr></thead>
             <tbody>
-              {rules.map(r => (
-                <tr key={r.id}>
-                  <td style={styles.td}>{r.label || '—'}</td>
-                  <td style={styles.td}>{DAY_TYPE_OPTIONS.find(d => d.value === r.dayType)?.label}</td>
-                  <td style={{ ...styles.td, fontFamily: 'var(--font-mono)' }}>{r.startTime}–{r.endTime}</td>
-                  <td style={styles.td}><Badge tone={r.category}>{r.category.replace('_', ' ')}</Badge></td>
-                  <td style={{ ...styles.td, fontFamily: 'var(--font-mono)' }}>{fmtMoney(r.price)}</td>
-                  <td style={{ ...styles.td, fontFamily: 'var(--font-mono)', fontSize: 12 }}>{r.effectiveFrom || '—'} → {r.effectiveUntil || 'ongoing'}</td>
-                  <td style={styles.td}>
-                    <button style={styles.iconBtnSm} onClick={() => setEditingRule(r)}><Edit2 size={12} /></button>
-                    <button style={styles.iconBtnSm} onClick={() => deleteRule(r.id)}><Trash2 size={12} /></button>
-                  </td>
-                </tr>
-              ))}
+              {groups.map(g => {
+                const r = g.sample;
+                const allCourts = g.courtIds.length === venueCourts.length && !!r.ruleGroupId;
+                return (
+                  <tr key={g.key}>
+                    <td style={styles.td}>{r.label || '—'}</td>
+                    <td style={styles.td}>{DAY_TYPE_OPTIONS.find(d => d.value === r.dayType)?.label}</td>
+                    <td style={{ ...styles.td, fontFamily: 'var(--font-mono)' }}>{r.startTime}–{r.endTime}</td>
+                    <td style={styles.td}><Badge tone={r.category}>{r.category.replace('_', ' ')}</Badge></td>
+                    <td style={{ ...styles.td, fontFamily: 'var(--font-mono)' }}>{fmtMoney(r.price)}</td>
+                    <td style={styles.td}>{allCourts ? <Badge tone="weekday">All {venueCourts.length} courts</Badge> : g.courtIds.map(courtNameOf).join(', ')}</td>
+                    <td style={{ ...styles.td, fontFamily: 'var(--font-mono)', fontSize: 12 }}>{r.effectiveFrom || '—'} → {r.effectiveUntil || 'ongoing'}</td>
+                    <td style={styles.td}>
+                      <button style={styles.iconBtnSm} onClick={() => setEditingGroup(g)}><Edit2 size={12} /></button>
+                      <button style={styles.iconBtnSm} onClick={() => deleteGroup(g.key)}><Trash2 size={12} /></button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )
-      ) : <div style={styles.mutedNote}>Add a court to this venue first.</div>}
+      )}
 
-      {editingRule && (
-        <PricingModal rule={editingRule === 'new' ? null : editingRule} courtId={courtId} onSave={saveRule} onClose={() => setEditingRule(null)} />
+      {editingGroup && (
+        <PricingModal
+          group={editingGroup === 'new' ? null : editingGroup}
+          venueCourts={venueCourts}
+          onSave={(form) => saveGroup(form, editingGroup === 'new' ? null : editingGroup.key)}
+          onClose={() => setEditingGroup(null)}
+        />
       )}
     </TabWrap>
   );
 }
 
-function PricingModal({ rule, courtId, onSave, onClose }) {
-  const [f, setF] = useState(rule || {
-    id: uid('pr'), courtId, dayType: 'weekday', startTime: '06:00', endTime: '16:00',
-    price: 2500, category: 'off_peak', effectiveFrom: todayStr(), effectiveUntil: '', label: '',
+function PricingModal({ group, venueCourts, onSave, onClose }) {
+  const r = group?.sample;
+  const initialApplyMode = group ? (group.courtIds.length > 1 || !!r.ruleGroupId ? 'venue' : 'court') : 'venue';
+  const looksFlat = r && r.dayType === 'all' && r.startTime === '00:00' && r.endTime === '23:59';
+  const [flatRate, setFlatRate] = useState(group ? looksFlat : false);
+  const [f, setF] = useState({
+    label: r?.label || '', dayType: r?.dayType || 'weekday', startTime: r?.startTime || '06:00', endTime: r?.endTime || '16:00',
+    price: r?.price ?? 2500, category: r?.category || 'off_peak', effectiveFrom: r?.effectiveFrom || todayStr(), effectiveUntil: r?.effectiveUntil || '',
+    applyMode: initialApplyMode, singleCourtId: (group && initialApplyMode === 'court') ? group.courtIds[0] : (venueCourts[0]?.id || ''),
   });
   function set(k, v) { setF(prev => ({ ...prev, [k]: v })); }
+
+  function toggleFlatRate(checked) {
+    setFlatRate(checked);
+    if (checked) {
+      setF(prev => ({ ...prev, dayType: 'all', startTime: '00:00', endTime: '23:59', category: 'off_peak', label: prev.label || 'Flat rate (all day, every day)' }));
+    }
+  }
+
   return (
-    <Modal title={rule ? 'Edit pricing rule' : 'Add pricing rule'} onClose={onClose}>
-      <Field label="Label (optional)"><input style={styles.input} value={f.label} onChange={e => set('label', e.target.value)} placeholder="e.g. Weekday evening peak" /></Field>
-      <div style={styles.formRow}>
-        <Field label="Applies to"><Select value={f.dayType} onChange={v => set('dayType', v)} options={DAY_TYPE_OPTIONS} /></Field>
-        <Field label="Category"><Select value={f.category} onChange={v => set('category', v)} options={PRICING_CATEGORIES} /></Field>
+    <Modal title={group ? 'Edit pricing rule' : 'Add pricing rule'} onClose={onClose}>
+      <Field label="Applies to">
+        <div style={{ display: 'flex', gap: 14, fontSize: 13 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input type="radio" checked={f.applyMode === 'venue'} onChange={() => set('applyMode', 'venue')} />
+            All {venueCourts.length} court{venueCourts.length === 1 ? '' : 's'} at this venue
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input type="radio" checked={f.applyMode === 'court'} onChange={() => set('applyMode', 'court')} />
+            Just one court
+          </label>
+        </div>
+      </Field>
+      {f.applyMode === 'court' && (
+        <Field label="Court"><Select value={f.singleCourtId} onChange={v => set('singleCourtId', v)} options={venueCourts.map(c => ({ value: c.id, label: c.name }))} /></Field>
+      )}
+
+      <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', marginBottom: 14 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+          <input type="checkbox" checked={flatRate} onChange={e => toggleFlatRate(e.target.checked)} />
+          This venue has no separate peak / off-peak pricing — one flat rate all day
+        </label>
       </div>
-      <div style={styles.formRow}>
-        <Field label="Start time"><input type="time" style={styles.input} value={f.startTime} onChange={e => set('startTime', e.target.value)} /></Field>
-        <Field label="End time"><input type="time" style={styles.input} value={f.endTime} onChange={e => set('endTime', e.target.value)} /></Field>
-      </div>
+
+      <Field label="Label (optional)"><input style={styles.input} value={f.label} onChange={e => set('label', e.target.value)} placeholder={flatRate ? 'e.g. Standard rate' : 'e.g. Weekday evening peak'} /></Field>
+
+      {!flatRate && (
+        <>
+          <div style={styles.formRow}>
+            <Field label="Applies on"><Select value={f.dayType} onChange={v => set('dayType', v)} options={DAY_TYPE_OPTIONS} /></Field>
+            <Field label="Category"><Select value={f.category} onChange={v => set('category', v)} options={PRICING_CATEGORIES} /></Field>
+          </div>
+          <div style={styles.formRow}>
+            <Field label="Start time"><input type="time" style={styles.input} value={f.startTime} onChange={e => set('startTime', e.target.value)} /></Field>
+            <Field label="End time"><input type="time" style={styles.input} value={f.endTime} onChange={e => set('endTime', e.target.value)} /></Field>
+          </div>
+        </>
+      )}
+      {flatRate && (
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: -8, marginBottom: 12 }}>
+          Applies every day, all 24 hours, tagged as off-peak — this is the only rate needed for this venue.
+        </div>
+      )}
+
       <Field label="Price per hour (Rs)"><input type="number" style={styles.input} value={f.price} onChange={e => set('price', parseFloat(e.target.value) || 0)} /></Field>
       <div style={styles.formRow}>
         <Field label="Effective from"><input type="date" style={styles.input} value={f.effectiveFrom} onChange={e => set('effectiveFrom', e.target.value)} /></Field>
