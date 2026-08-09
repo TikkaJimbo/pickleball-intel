@@ -418,6 +418,7 @@ function App() {
             if (h.state === 'closed') return;
             rows.push({
               courtId, courtName: court.name, venueId: venue.id, venueName: venue.name,
+              business: venue.business || venue.name,
               city: venue.city, district: venue.district, province: venue.province,
               date: dateStr, hour, weekend, special: special ? special.type : null,
               state: h.state, occupied: h.state === 'occupied',
@@ -890,7 +891,10 @@ function VenuesTab({ ctx }) {
               <div style={styles.venueRow} onClick={() => setExpanded(isOpen ? null : v.id)}>
                 <ChevronDown size={16} style={{ transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform .15s', flexShrink: 0 }} />
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 800, fontFamily: 'var(--font-display)', letterSpacing: '.01em' }}>{v.name}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {v.business && <Badge tone="weekday">{v.business}</Badge>}
+                    <div style={{ fontWeight: 800, fontFamily: 'var(--font-display)', letterSpacing: '.01em' }}>{v.name}</div>
+                  </div>
                   <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
                     {v.city} · {v.district} · {v.province} · {vCourts.length} court{vCourts.length === 1 ? '' : 's'} · {v.type.replace('_', ' ')}
                   </div>
@@ -924,7 +928,7 @@ function VenuesTab({ ctx }) {
         })}
       </div>
 
-      {editingVenue && <VenueModal venue={editingVenue === 'new' ? null : editingVenue} onSave={saveVenue} onClose={() => setEditingVenue(null)} />}
+      {editingVenue && <VenueModal venue={editingVenue === 'new' ? null : editingVenue} knownBusinesses={[...new Set(master.venues.map(v => v.business).filter(Boolean))]} onSave={saveVenue} onClose={() => setEditingVenue(null)} />}
       {editingCourt && (
         <CourtModal
           court={editingCourt.court === 'new' ? null : editingCourt.court}
@@ -938,9 +942,9 @@ function VenuesTab({ ctx }) {
   );
 }
 
-function VenueModal({ venue, onSave, onClose }) {
+function VenueModal({ venue, knownBusinesses = [], onSave, onClose }) {
   const [f, setF] = useState(venue || {
-    id: uid('v'), name: '', country: 'Sri Lanka', province: PROVINCES[0], district: PROVINCE_DISTRICTS[PROVINCES[0]][0],
+    id: uid('v'), business: '', name: '', country: 'Sri Lanka', province: PROVINCES[0], district: PROVINCE_DISTRICTS[PROVINCES[0]][0],
     city: '', address: '', lat: '', lng: '', courtCount: 1, type: 'outdoor', openingTime: '06:00', closingTime: '22:00', active: true, notes: '',
   });
   const districts = PROVINCE_DISTRICTS[f.province] || [];
@@ -949,7 +953,17 @@ function VenueModal({ venue, onSave, onClose }) {
 
   return (
     <Modal title={venue ? 'Edit venue' : 'Add venue'} onClose={onClose}>
-      <Field label="Venue name"><input style={styles.input} value={f.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Kitchen Line Colombo" /></Field>
+      <Field label="Business / brand (optional)">
+        <input style={styles.input} value={f.business} onChange={e => set('business', e.target.value)}
+          placeholder="e.g. Pickle Island" list="business-options" />
+        <datalist id="business-options">
+          {knownBusinesses.map(b => <option key={b} value={b} />)}
+        </datalist>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+          Use the same name across every location run by one operator (e.g. two "Pickle Island" branches) to roll their performance up together.
+        </div>
+      </Field>
+      <Field label="Venue name (this specific location)"><input style={styles.input} value={f.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Pickle Island, Excel" /></Field>
       <div style={styles.formRow}>
         <Field label="Province"><Select value={f.province} onChange={v => { set('province', v); set('district', PROVINCE_DISTRICTS[v][0]); }} options={PROVINCES} /></Field>
         <Field label="District"><Select value={f.district} onChange={v => set('district', v)} options={districts} /></Field>
@@ -972,6 +986,7 @@ function VenueModal({ venue, onSave, onClose }) {
     </Modal>
   );
 }
+
 
 function CourtModal({ court, venueId, existingCount, onSave, onClose }) {
   const [f, setF] = useState(court || {
@@ -1332,6 +1347,8 @@ function RankingsTab({ ctx }) {
     .filter(r => r.availableHours > 0).sort((a, b) => b[metric] - a[metric]);
   const byCity = groupAndAggregate(rows, r => r.city, aggregate)
     .filter(r => r.availableHours > 0).sort((a, b) => b[metric] - a[metric]);
+  const byBusiness = groupAndAggregate(rows, r => r.business, aggregate)
+    .filter(r => r.availableHours > 0).sort((a, b) => b[metric] - a[metric]);
 
   const metricOptions = [
     { value: 'occupancyPct', label: 'Occupancy %' },
@@ -1342,14 +1359,18 @@ function RankingsTab({ ctx }) {
   const fmt = (v, key) => key === 'occupancyPct' ? fmtPct(v) : key === 'revenue' || key === 'revpah' ? fmtMoney(v) : v.toLocaleString();
 
   return (
-    <TabWrap title="Rankings" eyebrow="Venues & cities">
+    <TabWrap title="Rankings" eyebrow="Venues, cities & businesses">
       <div style={styles.filterRow}>
         <Select value={String(days)} onChange={v => setDays(Number(v))} options={[{ value: '7', label: 'Last 7 days' }, { value: '30', label: 'Last 30 days' }, { value: '90', label: 'Last 90 days' }]} />
         <Select value={metric} onChange={setMetric} options={metricOptions} />
       </div>
 
       {rows.length === 0 ? <div style={styles.mutedNote}>No occupancy data logged for this range yet.</div> : (
-        <div style={styles.twoCol}>
+        <div style={styles.threeCol}>
+          <Card eyebrow="Business leaderboard" title="Top businesses">
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>Locations sharing a business name in Venues & Courts are combined here.</div>
+            <RankList rows={byBusiness} metric={metric} fmt={fmt} />
+          </Card>
           <Card eyebrow="Venue leaderboard" title="Top venues">
             <RankList rows={byVenue} metric={metric} fmt={fmt} />
           </Card>
@@ -1497,6 +1518,7 @@ const styles = {
   statSub: { fontSize: 11, color: 'var(--muted)', marginTop: 3 },
 
   twoCol: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 },
+  threeCol: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14, marginBottom: 16 },
   card: { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 18, marginBottom: 0 },
   cardHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
   cardTitle: { fontWeight: 800, fontSize: 15, fontFamily: 'var(--font-display)' },
