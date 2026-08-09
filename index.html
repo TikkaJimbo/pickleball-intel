@@ -206,12 +206,13 @@ function fmtPct(n) {
 function safeDiv(a, b) { return b > 0 ? a / b : 0; }
 
 function defaultHourStates(openTime, closeTime) {
-  const openMin = timeToMin(openTime || '06:00');
-  const closeMin = timeToMin(closeTime || '22:00');
+  // Every hour starts "available" by default — simplest for data entry.
+  // openTime/closeTime are still used elsewhere (Week view's row range,
+  // venue display) but no longer pre-close hours here; mark a specific
+  // hour "closed" manually if a court genuinely never opens then.
   const arr = [];
   for (let h = 0; h < 24; h++) {
-    const withinOpen = h * 60 >= openMin && h * 60 < closeMin;
-    arr.push({ state: withinOpen ? 'available' : 'closed', price: null, category: null });
+    arr.push({ state: 'available', price: null, category: null });
   }
   return arr;
 }
@@ -1097,6 +1098,7 @@ function PricingTab({ ctx }) {
   const { master, setMaster } = ctx;
   const [venueId, setVenueId] = useState(master.venues[0]?.id || '');
   const [editingGroup, setEditingGroup] = useState(null); // null | 'new' | groupObject
+  const [showQuickSetup, setShowQuickSetup] = useState(false);
 
   const venueCourts = master.courts.filter(c => c.venueId === venueId);
   const venueCourtIds = new Set(venueCourts.map(c => c.id));
@@ -1136,6 +1138,27 @@ function PricingTab({ ctx }) {
     setMaster({ ...master, pricing: master.pricing.filter(p => (p.ruleGroupId || p.id) !== key) });
   }
 
+  function saveQuickSetup(form) {
+    // Replace only the rules this wizard previously generated for this venue
+    // (tagged quickSetup: true) — any custom rules added separately are untouched.
+    const kept = master.pricing.filter(p => !(venueCourtIds.has(p.courtId) && p.quickSetup));
+    const rows = [
+      { dayType: 'weekday', startTime: form.offPeakStart, endTime: form.offPeakEnd, price: form.offPeakPrice, category: 'off_peak', label: 'Weekday off-peak' },
+      { dayType: 'weekday', startTime: form.peakStart, endTime: form.peakEnd, price: form.peakPrice, category: 'peak', label: 'Weekday peak' },
+      { dayType: 'weekend', startTime: '00:00', endTime: '23:59', price: form.peakPrice, category: 'peak', label: 'Weekend (all day, peak rate)' },
+    ];
+    const added = [];
+    rows.forEach(row => {
+      const groupId = uid('rg');
+      venueCourts.forEach(c => added.push({
+        id: uid('pr'), courtId: c.id, ruleGroupId: groupId, quickSetup: true,
+        effectiveFrom: form.effectiveFrom, effectiveUntil: '', ...row,
+      }));
+    });
+    setMaster({ ...master, pricing: [...kept, ...added] });
+    setShowQuickSetup(false);
+  }
+
   if (master.venues.length === 0) {
     return <TabWrap title="Pricing" eyebrow="Peak / off-peak / special"><EmptyState icon={DollarSign} title="Add a venue first" body="Set pricing once you've added a venue and at least one court." /></TabWrap>;
   }
@@ -1144,11 +1167,12 @@ function PricingTab({ ctx }) {
     <TabWrap title="Pricing" eyebrow="Set once per venue · historically preserved">
       <div style={styles.filterRow}>
         <Select value={venueId} onChange={setVenueId} options={master.venues.map(v => ({ value: v.id, label: v.name }))} />
-        {venueCourts.length > 0 && <button style={styles.primaryBtn} onClick={() => setEditingGroup('new')}><Plus size={14} /> Add pricing rule</button>}
+        {venueCourts.length > 0 && <button style={styles.primaryBtn} onClick={() => setShowQuickSetup(true)}><DollarSign size={13} /> Quick setup: peak / off-peak</button>}
+        {venueCourts.length > 0 && <button style={styles.ghostBtn} onClick={() => setEditingGroup('new')}><Plus size={14} /> Add custom rule</button>}
       </div>
 
       {venueCourts.length === 0 ? <div style={styles.mutedNote}>Add a court to this venue first (Venues &amp; Courts tab).</div> : (
-        groups.length === 0 ? <div style={styles.mutedNote}>No pricing set for this venue yet. Add a rule — by default it covers all {venueCourts.length} court{venueCourts.length === 1 ? '' : 's'} here.</div> : (
+        groups.length === 0 ? <div style={styles.mutedNote}>No pricing set for this venue yet. Use "Quick setup" for the common weekday off-peak / peak / weekend split — it covers all {venueCourts.length} court{venueCourts.length === 1 ? '' : 's'} here in one go.</div> : (
           <table style={styles.table}>
             <thead><tr>
               <th style={styles.th}>Label</th><th style={styles.th}>Applies</th><th style={styles.th}>Time</th>
@@ -1180,6 +1204,15 @@ function PricingTab({ ctx }) {
         )
       )}
 
+      {showQuickSetup && (
+        <QuickPricingModal
+          existingRules={master.pricing.filter(p => venueCourtIds.has(p.courtId) && p.quickSetup)}
+          venueCourtCount={venueCourts.length}
+          onSave={saveQuickSetup}
+          onClose={() => setShowQuickSetup(false)}
+        />
+      )}
+
       {editingGroup && (
         <PricingModal
           group={editingGroup === 'new' ? null : editingGroup}
@@ -1191,6 +1224,59 @@ function PricingTab({ ctx }) {
     </TabWrap>
   );
 }
+
+function QuickPricingModal({ existingRules, venueCourtCount, onSave, onClose }) {
+  const offPeakRule = existingRules.find(r => r.category === 'off_peak' && r.dayType === 'weekday');
+  const peakRule = existingRules.find(r => r.category === 'peak' && r.dayType === 'weekday');
+  const [f, setF] = useState({
+    offPeakPrice: offPeakRule?.price ?? 2500,
+    offPeakStart: offPeakRule?.startTime ?? '06:00',
+    offPeakEnd: offPeakRule?.endTime ?? '16:00',
+    peakPrice: peakRule?.price ?? 3500,
+    peakStart: peakRule?.startTime ?? '16:00',
+    peakEnd: peakRule?.endTime ?? '23:59',
+    effectiveFrom: offPeakRule?.effectiveFrom || todayStr(),
+  });
+  function set(k, v) { setF(prev => ({ ...prev, [k]: v })); }
+
+  return (
+    <Modal title="Quick setup: peak / off-peak pricing" onClose={onClose}>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
+        Applies to all {venueCourtCount} court{venueCourtCount === 1 ? '' : 's'} at this venue. Weekends are priced at your peak rate, all day — no separate entry needed.
+      </div>
+
+      <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 14, marginBottom: 14 }}>
+        <div style={{ fontWeight: 800, fontSize: 12.5, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--muted)' }}>Weekday off-peak</div>
+        <Field label="Off-peak price per hour (Rs)"><input type="number" style={styles.input} value={f.offPeakPrice} onChange={e => set('offPeakPrice', parseFloat(e.target.value) || 0)} /></Field>
+        <div style={styles.formRow}>
+          <Field label="From"><input type="time" style={styles.input} value={f.offPeakStart} onChange={e => set('offPeakStart', e.target.value)} /></Field>
+          <Field label="To"><input type="time" style={styles.input} value={f.offPeakEnd} onChange={e => set('offPeakEnd', e.target.value)} /></Field>
+        </div>
+      </div>
+
+      <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 14, marginBottom: 14 }}>
+        <div style={{ fontWeight: 800, fontSize: 12.5, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--muted)' }}>Weekday peak</div>
+        <Field label="Peak price per hour (Rs)"><input type="number" style={styles.input} value={f.peakPrice} onChange={e => set('peakPrice', parseFloat(e.target.value) || 0)} /></Field>
+        <div style={styles.formRow}>
+          <Field label="From"><input type="time" style={styles.input} value={f.peakStart} onChange={e => set('peakStart', e.target.value)} /></Field>
+          <Field label="To"><input type="time" style={styles.input} value={f.peakEnd} onChange={e => set('peakEnd', e.target.value)} /></Field>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Badge tone="weekend">Weekend</Badge> all day @ {fmtMoney(f.peakPrice)}/hr (your peak rate)
+      </div>
+
+      <Field label="Effective from"><input type="date" style={styles.input} value={f.effectiveFrom} onChange={e => set('effectiveFrom', e.target.value)} /></Field>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: -4, marginBottom: 8 }}>
+        <Info size={11} style={{ verticalAlign: '-1px', marginRight: 4 }} />
+        Running this again later replaces these three rules with your new numbers — any custom rules you've added separately are left alone.
+      </div>
+      <ModalFooter onClose={onClose} onSave={() => onSave(f)} disabled={!f.offPeakPrice || !f.peakPrice} />
+    </Modal>
+  );
+}
+
 
 function PricingModal({ group, venueCourts, onSave, onClose }) {
   const r = group?.sample;
@@ -1317,6 +1403,24 @@ function DayEntry({ ctx, venue, court, date, setDate }) {
   const monthKey = monthKeyOf(date);
   const hours = (occData[monthKey]?.[courtId]?.[date]) || defaultHourStates(...Object.values(courtHours(court, venue)));
 
+  // If hours were marked occupied before any pricing rule existed for this
+  // court, backfill the price now that a rule exists — but never touch an
+  // hour that already has a price (pricing history stays intact).
+  useEffect(() => {
+    let changed = false;
+    const next = hours.map((h, i) => {
+      if (h.state === 'occupied' && h.price == null) {
+        const rule = matchPricingRule(master.pricing, courtId, date, i);
+        if (rule) { changed = true; return { ...h, price: rule.price, category: rule.category }; }
+      }
+      return h;
+    });
+    if (!changed) return;
+    const monthData = { ...(occData[monthKey] || {}) };
+    monthData[courtId] = { ...(monthData[courtId] || {}), [date]: next };
+    persistOccMonth(monthKey, monthData);
+  }, [courtId, date, master.pricing, occData[monthKey]]); // eslint-disable-line
+
   function cycleState(h) {
     const next = hours.map((x, i) => {
       if (i !== h) return x;
@@ -1421,6 +1525,31 @@ function WeekEntry({ ctx, venue, court, anchor, setAnchor }) {
     monthData[courtId] = { ...(monthData[courtId] || {}), [dateStr]: next };
     persistOccMonth(mKey, monthData);
   }
+
+  // Backfill any occupied hour in the visible week that's missing a price
+  // now that a matching rule exists — hours that already have a price are
+  // left untouched.
+  useEffect(() => {
+    const byMonth = {};
+    days.forEach(d => {
+      const mKey = monthKeyOf(d);
+      const dayHours = hoursFor(d);
+      let changed = false;
+      const next = dayHours.map((h, i) => {
+        if (i < openHour || i >= closeHourExclusive) return h;
+        if (h.state === 'occupied' && h.price == null) {
+          const rule = matchPricingRule(master.pricing, courtId, d, i);
+          if (rule) { changed = true; return { ...h, price: rule.price, category: rule.category }; }
+        }
+        return h;
+      });
+      if (changed) {
+        if (!byMonth[mKey]) byMonth[mKey] = { ...(occData[mKey] || {}) };
+        byMonth[mKey][courtId] = { ...(byMonth[mKey][courtId] || {}), [d]: next };
+      }
+    });
+    Object.entries(byMonth).forEach(([mKey, monthData]) => persistOccMonth(mKey, monthData));
+  }, [courtId, monday, master.pricing, occData]); // eslint-disable-line
 
   // week-level stats
   let avail = 0, occ = 0, rev = 0;
