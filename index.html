@@ -176,6 +176,19 @@ function isWeekendDate(dateStr) {
   return dow === 0 || dow === 6;
 }
 function monthKeyOf(dateStr) { return dateStr.slice(0, 7); }
+function startOfWeekMonday(dateStr) {
+  const dow = dateToDow(dateStr); // 0=Sun..6=Sat
+  const diff = dow === 0 ? -6 : 1 - dow;
+  return addDaysStr(dateStr, diff);
+}
+function weekDates(mondayStr) {
+  return Array.from({ length: 7 }, (_, i) => addDaysStr(mondayStr, i));
+}
+function fmtShortDate(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${d} ${months[m - 1]}`;
+}
 function timeToMin(t) { if (!t) return 0; const [h, m] = t.split(':').map(Number); return h * 60 + m; }
 function hourLabel(h) {
   const period = h < 12 ? 'AM' : 'PM';
@@ -848,7 +861,25 @@ function VenuesTab({ ctx }) {
   function saveVenue(venue) {
     const exists = master.venues.some(v => v.id === venue.id);
     const venues = exists ? master.venues.map(v => v.id === venue.id ? venue : v) : [...master.venues, venue];
-    setMaster({ ...master, venues });
+
+    // Auto-create Court 1..N up to the requested court count. Never removes
+    // or renames courts that already exist — only tops up the shortfall.
+    const currentCourts = master.courts.filter(c => c.venueId === venue.id);
+    const wanted = Math.max(0, parseInt(venue.courtCount, 10) || 0);
+    let courts = master.courts;
+    if (wanted > currentCourts.length) {
+      const usedNumbers = new Set(currentCourts.map(c => c.number));
+      const newCourts = [];
+      let n = 1;
+      for (let i = currentCourts.length; i < wanted; i++) {
+        while (usedNumbers.has(n)) n++;
+        newCourts.push({ id: uid('c'), venueId: venue.id, name: `Court ${n}`, number: n, type: 'standard', surface: 'acrylic', active: true, openOverride: '', closeOverride: '', notes: '' });
+        usedNumbers.add(n);
+        n++;
+      }
+      courts = [...master.courts, ...newCourts];
+    }
+    setMaster({ ...master, venues, courts });
     setEditingVenue(null);
   }
   function deleteVenue(id) {
@@ -965,14 +996,24 @@ function VenueModal({ venue, knownBusinesses = [], onSave, onClose }) {
       </Field>
       <Field label="Venue name (this specific location)"><input style={styles.input} value={f.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Pickle Island, Excel" /></Field>
       <div style={styles.formRow}>
+        <Field label="Number of courts">
+          <input type="number" min="1" max="40" style={styles.input} value={f.courtCount}
+            onChange={e => set('courtCount', e.target.value)} />
+        </Field>
+        <Field label="Venue type"><Select value={f.type} onChange={v => set('type', v)} options={VENUE_TYPES} /></Field>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: -8, marginBottom: 8 }}>
+        <Info size={11} style={{ verticalAlign: '-1px', marginRight: 4 }} />
+        On save, we'll create "Court 1" through "Court {f.courtCount || 1}" automatically if they don't exist yet. Existing courts are never removed or renamed this way — rename or add more from the venue's expanded row afterwards.
+      </div>
+      <div style={styles.formRow}>
         <Field label="Province"><Select value={f.province} onChange={v => { set('province', v); set('district', PROVINCE_DISTRICTS[v][0]); }} options={PROVINCES} /></Field>
         <Field label="District"><Select value={f.district} onChange={v => set('district', v)} options={districts} /></Field>
       </div>
       <div style={styles.formRow}>
         <Field label="City / Area"><input style={styles.input} value={f.city} onChange={e => set('city', e.target.value)} placeholder="e.g. Boralesgamuwa" /></Field>
-        <Field label="Venue type"><Select value={f.type} onChange={v => set('type', v)} options={VENUE_TYPES} /></Field>
+        <Field label="Address"><input style={styles.input} value={f.address} onChange={e => set('address', e.target.value)} /></Field>
       </div>
-      <Field label="Address"><input style={styles.input} value={f.address} onChange={e => set('address', e.target.value)} /></Field>
       <div style={styles.formRow}>
         <Field label="Latitude (optional)"><input style={styles.input} value={f.lat} onChange={e => set('lat', e.target.value)} placeholder="6.8845" /></Field>
         <Field label="Longitude (optional)"><input style={styles.input} value={f.lng} onChange={e => set('lng', e.target.value)} placeholder="79.8657" /></Field>
@@ -1145,20 +1186,48 @@ function PricingModal({ rule, courtId, onSave, onClose }) {
 
 function OccupancyTab({ ctx }) {
   const { master, occData, persistOccMonth } = ctx;
+  const [mode, setMode] = useState('week'); // 'day' | 'week'
   const [venueId, setVenueId] = useState(master.venues[0]?.id || '');
   const [courtId, setCourtId] = useState('');
   const [date, setDate] = useState(todayStr());
+  const [weekAnchor, setWeekAnchor] = useState(todayStr());
 
   const venue = master.venues.find(v => v.id === venueId);
   const venueCourts = master.courts.filter(c => c.venueId === venueId);
   useEffect(() => { if (!venueCourts.some(c => c.id === courtId)) setCourtId(venueCourts[0]?.id || ''); }, [venueId]); // eslint-disable-line
   const court = master.courts.find(c => c.id === courtId);
 
+  if (master.venues.length === 0) {
+    return <TabWrap title="Log Occupancy" eyebrow="Calendar entry, court by court"><EmptyState icon={CircleDot} title="Add a venue first" body="You need at least one venue and court before logging occupancy." /></TabWrap>;
+  }
+
+  return (
+    <TabWrap title="Log Occupancy" eyebrow="Calendar entry, court by court">
+      <div style={styles.filterRow}>
+        <Select value={venueId} onChange={setVenueId} options={master.venues.map(v => ({ value: v.id, label: v.name }))} />
+        <Select value={courtId} onChange={setCourtId} options={venueCourts.map(c => ({ value: c.id, label: c.name }))} placeholder={venueCourts.length ? undefined : 'No courts'} />
+        <div style={styles.modeToggle}>
+          <button onClick={() => setMode('week')} style={{ ...styles.modeToggleBtn, ...(mode === 'week' ? styles.modeToggleBtnActive : {}) }}>Week</button>
+          <button onClick={() => setMode('day')} style={{ ...styles.modeToggleBtn, ...(mode === 'day' ? styles.modeToggleBtnActive : {}) }}>Day</button>
+        </div>
+      </div>
+
+      {!court ? <div style={styles.mutedNote}>Add a court to this venue first — go to Venues &amp; Courts, open this venue, and click "Add court".</div> : (
+        mode === 'week'
+          ? <WeekEntry ctx={ctx} venue={venue} court={court} anchor={weekAnchor} setAnchor={setWeekAnchor} />
+          : <DayEntry ctx={ctx} venue={venue} court={court} date={date} setDate={setDate} />
+      )}
+    </TabWrap>
+  );
+}
+
+function DayEntry({ ctx, venue, court, date, setDate }) {
+  const { master, occData, persistOccMonth } = ctx;
+  const courtId = court.id;
   const monthKey = monthKeyOf(date);
-  const hours = (occData[monthKey]?.[courtId]?.[date]) || (court && venue ? defaultHourStates(...Object.values(courtHours(court, venue))) : []);
+  const hours = (occData[monthKey]?.[courtId]?.[date]) || defaultHourStates(...Object.values(courtHours(court, venue)));
 
   function cycleState(h) {
-    if (!court) return;
     const next = hours.map((x, i) => {
       if (i !== h) return x;
       const order = ['closed', 'available', 'occupied'];
@@ -1178,7 +1247,6 @@ function OccupancyTab({ ctx }) {
   }
 
   function resetDay() {
-    if (!court || !venue) return;
     if (!confirm('Reset this day to default open/closed hours? Any bookings logged for it will be lost.')) return;
     const fresh = defaultHourStates(...Object.values(courtHours(court, venue)));
     const monthData = { ...(occData[monthKey] || {}) };
@@ -1186,58 +1254,150 @@ function OccupancyTab({ ctx }) {
     persistOccMonth(monthKey, monthData);
   }
 
-  const dayAgg = (() => {
-    const avail = hours.filter(h => h.state !== 'closed').length;
-    const occ = hours.filter(h => h.state === 'occupied').length;
-    const rev = hours.filter(h => h.state === 'occupied').reduce((s, h) => s + (h.price || 0), 0);
-    return { avail, occ, rev, pct: safeDiv(occ, avail) * 100 };
-  })();
-
-  if (master.venues.length === 0) {
-    return <TabWrap title="Log Occupancy" eyebrow="One court × one date × 24 hours"><EmptyState icon={CircleDot} title="Add a venue first" body="You need at least one venue and court before logging hourly occupancy." /></TabWrap>;
-  }
+  const avail = hours.filter(h => h.state !== 'closed').length;
+  const occ = hours.filter(h => h.state === 'occupied').length;
+  const rev = hours.filter(h => h.state === 'occupied').reduce((s, h) => s + (h.price || 0), 0);
+  const pct = safeDiv(occ, avail) * 100;
 
   return (
-    <TabWrap title="Log Occupancy" eyebrow="One court × one date × 24 hourly slots">
-      <div style={styles.filterRow}>
-        <Select value={venueId} onChange={setVenueId} options={master.venues.map(v => ({ value: v.id, label: v.name }))} />
-        <Select value={courtId} onChange={setCourtId} options={venueCourts.map(c => ({ value: c.id, label: c.name }))} placeholder={venueCourts.length ? undefined : 'No courts'} />
+    <>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
         <input type="date" style={styles.input} value={date} onChange={e => setDate(e.target.value)} />
         <button style={styles.ghostBtn} onClick={resetDay}><RefreshCw size={13} /> Reset day</button>
       </div>
 
-      {!court ? <div style={styles.mutedNote}>Add a court to this venue first.</div> : (
-        <>
-          <div style={styles.legendRow}>
-            <LegendDot color="var(--border)" label="Closed (tap to open)" />
-            <LegendDot color="#BFE0CC" label="Available" />
-            <LegendDot color="var(--court)" label="Occupied" />
-          </div>
+      <div style={styles.legendRow}>
+        <LegendDot color="var(--border)" label="Closed (tap to open)" />
+        <LegendDot color="#BFE0CC" label="Available" />
+        <LegendDot color="var(--court)" label="Occupied" />
+      </div>
 
-          <div style={styles.hourGrid}>
-            {hours.map((h, i) => (
-              <button key={i} onClick={() => cycleState(i)} style={{
-                ...styles.hourCell,
-                background: h.state === 'closed' ? 'var(--bg)' : h.state === 'occupied' ? 'var(--court)' : '#BFE0CC',
-                borderColor: h.state === 'closed' ? 'var(--border)' : 'transparent',
-                color: h.state === 'occupied' ? '#fff' : 'var(--ink)',
-              }}>
-                <span style={{ fontSize: 11, fontWeight: 700 }}>{hourLabel(i)}</span>
-                {h.state === 'occupied' && h.price != null && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', opacity: 0.9 }}>{fmtMoney(h.price)}</span>}
-                {h.state !== 'closed' && h.category && <span style={{ fontSize: 8, opacity: 0.75, textTransform: 'uppercase' }}>{h.category.replace('_', ' ')}</span>}
-              </button>
+      <div style={styles.hourGrid}>
+        {hours.map((h, i) => (
+          <button key={i} onClick={() => cycleState(i)} style={{
+            ...styles.hourCell,
+            background: h.state === 'closed' ? 'var(--bg)' : h.state === 'occupied' ? 'var(--court)' : '#BFE0CC',
+            borderColor: h.state === 'closed' ? 'var(--border)' : 'transparent',
+            color: h.state === 'occupied' ? '#fff' : 'var(--ink)',
+          }}>
+            <span style={{ fontSize: 11, fontWeight: 700 }}>{hourLabel(i)}</span>
+            {h.state === 'occupied' && h.price != null && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', opacity: 0.9 }}>{fmtMoney(h.price)}</span>}
+            {h.state !== 'closed' && h.category && <span style={{ fontSize: 8, opacity: 0.75, textTransform: 'uppercase' }}>{h.category.replace('_', ' ')}</span>}
+          </button>
+        ))}
+      </div>
+
+      <div style={styles.statGrid}>
+        <StatBlock label="Available hrs" value={avail} />
+        <StatBlock label="Occupied hrs" value={occ} />
+        <StatBlock label="Occupancy" value={fmtPct(pct)} accent="var(--court)" />
+        <StatBlock label="Est. revenue" value={fmtMoney(rev)} accent="var(--ball-dark)" />
+      </div>
+    </>
+  );
+}
+
+function WeekEntry({ ctx, venue, court, anchor, setAnchor }) {
+  const { master, occData, persistOccMonth } = ctx;
+  const courtId = court.id;
+  const monday = startOfWeekMonday(anchor);
+  const days = weekDates(monday);
+  const { open, close } = courtHours(court, venue);
+  const openHour = Math.floor(timeToMin(open) / 60);
+  const closeHourExclusive = Math.max(openHour + 1, Math.ceil(timeToMin(close) / 60));
+  const hourRows = [];
+  for (let h = openHour; h < closeHourExclusive; h++) hourRows.push(h);
+
+  function hoursFor(dateStr) {
+    const mKey = monthKeyOf(dateStr);
+    return (occData[mKey]?.[courtId]?.[dateStr]) || defaultHourStates(...Object.values(courtHours(court, venue)));
+  }
+
+  function toggleCell(dateStr, hour) {
+    const mKey = monthKeyOf(dateStr);
+    const existing = hoursFor(dateStr);
+    const next = existing.map((x, i) => {
+      if (i !== hour) return x;
+      const nextState = x.state === 'occupied' ? 'available' : 'occupied';
+      let price = x.price, category = x.category;
+      if (nextState === 'occupied') {
+        const rule = matchPricingRule(master.pricing, courtId, dateStr, hour);
+        price = rule ? rule.price : x.price;
+        category = rule ? rule.category : x.category;
+      }
+      return { state: nextState, price, category };
+    });
+    const monthData = { ...(occData[mKey] || {}) };
+    monthData[courtId] = { ...(monthData[courtId] || {}), [dateStr]: next };
+    persistOccMonth(mKey, monthData);
+  }
+
+  // week-level stats
+  let avail = 0, occ = 0, rev = 0;
+  days.forEach(d => {
+    hoursFor(d).forEach((h, i) => {
+      if (i < openHour || i >= closeHourExclusive) return;
+      avail++;
+      if (h.state === 'occupied') { occ++; rev += (h.price || 0); }
+    });
+  });
+  const pct = safeDiv(occ, avail) * 100;
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+        <button style={styles.iconBtn} onClick={() => setAnchor(addDaysStr(monday, -7))}><ChevronRight size={14} style={{ transform: 'rotate(180deg)' }} /></button>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>{fmtShortDate(days[0])} – {fmtShortDate(days[6])}</div>
+        <button style={styles.iconBtn} onClick={() => setAnchor(addDaysStr(monday, 7))}><ChevronRight size={14} /></button>
+        <button style={styles.ghostBtn} onClick={() => setAnchor(todayStr())}>This week</button>
+      </div>
+
+      <div style={styles.legendRow}>
+        <LegendDot color="#BFE0CC" label="Available — tap to book" />
+        <LegendDot color="var(--court)" label="Occupied — tap to free up" />
+      </div>
+
+      <Card>
+        <div style={styles.heatmapWrap}>
+          <div style={{ ...styles.heatmapGrid, gridTemplateColumns: `54px repeat(7, 60px)`, gap: 4 }}>
+            <div />
+            {days.map(d => (
+              <div key={d} style={styles.weekColHead}>
+                <div>{DAY_SHORT[days.indexOf(d)]}</div>
+                <div style={{ fontWeight: 400, fontSize: 10, color: 'var(--muted)' }}>{fmtShortDate(d)}</div>
+              </div>
+            ))}
+            {hourRows.map(h => (
+              <React.Fragment key={h}>
+                <div style={styles.heatmapRowHead}>{hourLabel(h)}</div>
+                {days.map(d => {
+                  const cell = hoursFor(d)[h];
+                  const isOccupied = cell.state === 'occupied';
+                  return (
+                    <button key={d + h} onClick={() => toggleCell(d, h)}
+                      title={`${DAY_NAMES[dateToDow(d)]} ${fmtShortDate(d)}, ${hourLabel(h)}${isOccupied && cell.price != null ? ' — ' + fmtMoney(cell.price) : ''}`}
+                      style={{
+                        ...styles.weekCell,
+                        background: isOccupied ? 'var(--court)' : '#BFE0CC',
+                        color: isOccupied ? '#fff' : 'var(--ink)',
+                      }}>
+                      {isOccupied && cell.price != null ? <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)' }}>{Math.round(cell.price / 100) / 10}k</span> : null}
+                    </button>
+                  );
+                })}
+              </React.Fragment>
             ))}
           </div>
+        </div>
+      </Card>
 
-          <div style={styles.statGrid}>
-            <StatBlock label="Available hrs" value={dayAgg.avail} />
-            <StatBlock label="Occupied hrs" value={dayAgg.occ} />
-            <StatBlock label="Occupancy" value={fmtPct(dayAgg.pct)} accent="var(--court)" />
-            <StatBlock label="Est. revenue" value={fmtMoney(dayAgg.rev)} accent="var(--ball-dark)" />
-          </div>
-        </>
-      )}
-    </TabWrap>
+      <div style={styles.statGrid}>
+        <StatBlock label="Available hrs (week)" value={avail} />
+        <StatBlock label="Occupied hrs (week)" value={occ} />
+        <StatBlock label="Week occupancy" value={fmtPct(pct)} accent="var(--court)" />
+        <StatBlock label="Week est. revenue" value={fmtMoney(rev)} accent="var(--ball-dark)" />
+      </div>
+    </>
   );
 }
 
@@ -1567,6 +1727,12 @@ const styles = {
   heatmapColHead: { fontSize: 11, fontWeight: 800, textAlign: 'center', color: 'var(--muted)', paddingBottom: 4 },
   heatmapRowHead: { fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--font-mono)', textAlign: 'right', paddingRight: 6 },
   heatCell: { height: 20, borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+
+  modeToggle: { display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', marginLeft: 'auto' },
+  modeToggleBtn: { border: 'none', background: '#fff', padding: '8px 14px', fontSize: 12.5, fontWeight: 700, color: 'var(--muted)', cursor: 'pointer' },
+  modeToggleBtnActive: { background: 'var(--ink)', color: '#fff' },
+  weekColHead: { fontSize: 11, fontWeight: 800, textAlign: 'center', color: 'var(--ink)', paddingBottom: 6, lineHeight: 1.3 },
+  weekCell: { height: 30, borderRadius: 4, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
 
   rankNum: { width: 22, height: 22, borderRadius: '50%', background: '#EDF1EF', color: 'var(--muted)', fontSize: 11, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
 };
