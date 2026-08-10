@@ -840,11 +840,22 @@ function GeographyTab({ ctx }) {
   const [province, setProvince] = useState('');
   const [district, setDistrict] = useState('');
   const [city, setCity] = useState('');
+  const [monthKey, setMonthKey] = useState(todayStr().slice(0, 7));
+  const [week, setWeek] = useState(''); // '' = whole month
 
   const districts = province ? PROVINCE_DISTRICTS[province] : [...new Set(master.venues.map(v => v.district))];
   const cities = [...new Set(master.venues.filter(v => (!province || v.province === province) && (!district || v.district === district)).map(v => v.city))];
+  const weeks = weekRangesForMonth(monthKey);
+  useEffect(() => { setWeek(''); }, [monthKey]);
 
-  let rows = flatRows;
+  let rows = monthKey === 'all' ? flatRows : flatRows.filter(r => monthKeyOf(r.date) === monthKey);
+  if (monthKey !== 'all' && week !== '') {
+    const w = weeks[Number(week)];
+    rows = rows.filter(r => {
+      const day = parseInt(r.date.split('-')[2], 10);
+      return day >= w.startDay && day <= w.endDay;
+    });
+  }
   if (province) rows = rows.filter(r => r.province === province);
   if (district) rows = rows.filter(r => r.district === district);
   if (city) rows = rows.filter(r => r.city === city);
@@ -865,6 +876,8 @@ function GeographyTab({ ctx }) {
   return (
     <TabWrap title="Geographic Drill-Down" eyebrow="Sri Lanka → Province → District → City → Venue → Court">
       <div style={styles.filterRow}>
+        <Select value={monthKey} onChange={setMonthKey} options={[{ value: 'all', label: 'All time' }, ...monthOptions()]} />
+        {monthKey !== 'all' && <Select value={week} onChange={setWeek} placeholder="Whole month" options={weeks.map((w, i) => ({ value: String(i), label: `${w.label} (${w.startDay}–${w.endDay})` }))} />}
         <Select value={province} onChange={v => { setProvince(v); setDistrict(''); setCity(''); }} placeholder="All provinces" options={PROVINCES} />
         <Select value={district} onChange={v => { setDistrict(v); setCity(''); }} placeholder="All districts" options={districts} />
         <Select value={city} onChange={setCity} placeholder="All cities" options={cities} />
@@ -881,7 +894,7 @@ function GeographyTab({ ctx }) {
       </div>
 
       <Card title={`Breakdown by ${level === 'national' ? 'province' : level === 'province' ? 'district' : level === 'district' ? 'city' : 'venue'}`}>
-        {breakdown.length === 0 ? <div style={styles.mutedNote}>No occupancy data logged for this scope yet.</div> : (
+        {breakdown.length === 0 ? <div style={styles.mutedNote}>No occupancy data logged for {monthKey === 'all' ? 'this scope' : monthLabel(monthKey) + (week !== '' ? `, ${weeks[Number(week)].label}` : '')} yet.</div> : (
           <BreakdownTable rows={breakdown} />
         )}
       </Card>
