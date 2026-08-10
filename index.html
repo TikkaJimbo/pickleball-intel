@@ -580,10 +580,10 @@ function App() {
   }
 
   return (
-    <div style={styles.app}>
+    <div style={styles.app} className="app-shell">
       <style>{GLOBAL_CSS}</style>
       <Sidebar tab={tab} setTab={setTab} venueCount={master.venues.length} saving={saving} isAdmin={isAdmin} adminLogin={adminLogin} adminLogout={adminLogout} />
-      <main style={styles.main}>
+      <main style={styles.main} className="app-main">
         {tab === 'overview' && <OverviewTab ctx={ctx} />}
         {tab === 'geography' && <GeographyTab ctx={ctx} />}
         {tab === 'venues' && <VenuesTab ctx={ctx} />}
@@ -607,6 +607,7 @@ function Sidebar({ tab, setTab, venueCount, saving, isAdmin, adminLogin, adminLo
   const [showLogin, setShowLogin] = useState(false);
   const [pw, setPw] = useState('');
   const [err, setErr] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   function submitLogin(e) {
     e.preventDefault();
@@ -614,58 +615,71 @@ function Sidebar({ tab, setTab, venueCount, saving, isAdmin, adminLogin, adminLo
     else { setErr(true); }
   }
 
-  return (
-    <aside style={styles.sidebar}>
-      <div style={styles.brand}>
-        <div style={styles.brandBall} />
-        <div>
-          <div style={styles.brandTitle}>COURT&nbsp;LINE</div>
-          <div style={styles.brandSub}>Pickleball Market Intel — Sri Lanka</div>
-        </div>
-      </div>
-      <nav style={styles.nav}>
-        {TABS.map(t => {
-          const Icon = t.icon;
-          const active = tab === t.id;
-          return (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              style={{ ...styles.navBtn, ...(active ? styles.navBtnActive : {}) }}>
-              <Icon size={16} strokeWidth={2.25} />
-              <span>{t.label}</span>
-              {active && <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.6 }} />}
-            </button>
-          );
-        })}
-      </nav>
-      <div style={styles.sidebarFoot}>
-        <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: '.03em' }}>
-          {venueCount} venue{venueCount === 1 ? '' : 's'} tracked
-        </div>
-        <div style={{ fontSize: 11, color: saving ? 'var(--ball)' : 'var(--muted)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
-          {saving ? <><Loader2 size={11} className="spin" /> Saving…</> : <><Check size={11} /> Synced</>}
-        </div>
+  function selectTab(id) {
+    setTab(id);
+    setMobileOpen(false);
+  }
 
-        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-          {isAdmin ? (
-            <div>
-              <Badge tone="off_peak">Admin mode</Badge>
-              <button style={{ ...styles.ghostBtn, marginTop: 8, width: '100%', justifyContent: 'center', fontSize: 11.5, padding: '6px 10px' }} onClick={adminLogout}>Log out</button>
-            </div>
-          ) : showLogin ? (
-            <form onSubmit={submitLogin}>
-              <input type="password" autoFocus value={pw} onChange={e => { setPw(e.target.value); setErr(false); }}
-                placeholder="Admin password" style={{ ...styles.input, fontSize: 12.5, padding: '6px 8px', width: '100%' }} />
-              {err && <div style={{ fontSize: 10.5, color: 'var(--danger)', marginTop: 4 }}>Wrong password.</div>}
-              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                <button type="submit" style={{ ...styles.primaryBtn, fontSize: 11.5, padding: '6px 10px', flex: 1, justifyContent: 'center' }}>Log in</button>
-                <button type="button" style={{ ...styles.ghostBtn, fontSize: 11.5, padding: '6px 10px' }} onClick={() => { setShowLogin(false); setPw(''); setErr(false); }}>Cancel</button>
+  return (
+    <aside style={styles.sidebar} className="app-sidebar">
+      <div style={styles.brand} className="app-brand-row">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={styles.brandBall} />
+          <div>
+            <div style={styles.brandTitle}>COURT&nbsp;LINE</div>
+            <div style={styles.brandSub}>Pickleball Market Intel — Sri Lanka</div>
+          </div>
+        </div>
+        <button className="mobile-menu-btn" style={styles.mobileMenuBtn} onClick={() => setMobileOpen(o => !o)} aria-label="Toggle menu">
+          {mobileOpen ? <X size={18} /> : <Ic size={18}><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></Ic>}
+        </button>
+      </div>
+
+      <div className={mobileOpen ? 'sidebar-panel mobile-open' : 'sidebar-panel'}>
+        <nav style={styles.nav} className="app-nav">
+          {TABS.map(t => {
+            const Icon = t.icon;
+            const active = tab === t.id;
+            return (
+              <button key={t.id} onClick={() => selectTab(t.id)}
+                style={{ ...styles.navBtn, ...(active ? styles.navBtnActive : {}) }}>
+                <Icon size={16} strokeWidth={2.25} />
+                <span>{t.label}</span>
+                {active && <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.6 }} />}
+              </button>
+            );
+          })}
+        </nav>
+        <div style={styles.sidebarFoot}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: '.03em' }}>
+            {venueCount} venue{venueCount === 1 ? '' : 's'} tracked
+          </div>
+          <div style={{ fontSize: 11, color: saving ? 'var(--ball)' : 'var(--muted)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
+            {saving ? <><Loader2 size={11} className="spin" /> Saving…</> : <><Check size={11} /> Synced</>}
+          </div>
+
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+            {isAdmin ? (
+              <div>
+                <Badge tone="off_peak">Admin mode</Badge>
+                <button style={{ ...styles.ghostBtn, marginTop: 8, width: '100%', justifyContent: 'center', fontSize: 11.5, padding: '6px 10px' }} onClick={adminLogout}>Log out</button>
               </div>
-            </form>
-          ) : (
-            <button style={{ ...styles.ghostBtn, width: '100%', justifyContent: 'center', fontSize: 11.5, padding: '6px 10px' }} onClick={() => setShowLogin(true)}>Admin login</button>
-          )}
-          <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 8, opacity: 0.75 }}>
-            {isAdmin ? 'You can add and edit data.' : 'View-only — log in to add or edit data.'}
+            ) : showLogin ? (
+              <form onSubmit={submitLogin}>
+                <input type="password" autoFocus value={pw} onChange={e => { setPw(e.target.value); setErr(false); }}
+                  placeholder="Admin password" style={{ ...styles.input, fontSize: 12.5, padding: '6px 8px', width: '100%' }} />
+                {err && <div style={{ fontSize: 10.5, color: 'var(--danger)', marginTop: 4 }}>Wrong password.</div>}
+                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                  <button type="submit" style={{ ...styles.primaryBtn, fontSize: 11.5, padding: '6px 10px', flex: 1, justifyContent: 'center' }}>Log in</button>
+                  <button type="button" style={{ ...styles.ghostBtn, fontSize: 11.5, padding: '6px 10px' }} onClick={() => { setShowLogin(false); setPw(''); setErr(false); }}>Cancel</button>
+                </div>
+              </form>
+            ) : (
+              <button style={{ ...styles.ghostBtn, width: '100%', justifyContent: 'center', fontSize: 11.5, padding: '6px 10px' }} onClick={() => setShowLogin(true)}>Admin login</button>
+            )}
+            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 8, opacity: 0.75 }}>
+              {isAdmin ? 'You can add and edit data.' : 'View-only — log in to add or edit data.'}
+            </div>
           </div>
         </div>
       </div>
@@ -799,7 +813,7 @@ function OverviewTab({ ctx }) {
         ) : null
       }>
 
-      <div style={styles.statGrid}>
+      <div style={styles.statGrid} className="stat-grid">
         <StatBlock label="Venues tracked" value={master.venues.length} />
         <StatBlock label="Courts tracked" value={master.courts.length} />
         <StatBlock label="Cities tracked" value={new Set(master.venues.map(v => v.city)).size} />
@@ -808,7 +822,7 @@ function OverviewTab({ ctx }) {
         <StatBlock label="Busiest hour today" value={busiestHour ? hourLabel(busiestHour.h) : '—'} sub={busiestHour ? fmtPct(busiestHour.occupancyPct) + ' occupied' : ''} />
       </div>
 
-      <div style={styles.twoCol}>
+      <div style={styles.twoCol} className="two-col">
         <Card eyebrow="Last 30 days" title="Weekday vs Weekend Occupancy">
           <div style={styles.compareRow}>
             <CompareBar label="Weekday" pct={weekdayAgg.occupancyPct} hours={weekdayAgg.occupiedHours} />
@@ -961,7 +975,7 @@ function GeographyTab({ ctx }) {
         <Select value={city} onChange={setCity} placeholder="All cities" options={cities} />
       </div>
 
-      <div style={styles.statGrid}>
+      <div style={styles.statGrid} className="stat-grid">
         <StatBlock label="Venues in scope" value={venuesInScope.length} />
         <StatBlock label="Available court-hrs" value={agg.availableHours.toLocaleString()} />
         <StatBlock label="Occupied court-hrs" value={agg.occupiedHours.toLocaleString()} />
@@ -1163,7 +1177,7 @@ function VenueModal({ venue, knownBusinesses = [], onSave, onClose }) {
         </div>
       </Field>
       <Field label="Venue name (this specific location)"><input style={styles.input} value={f.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Pickle Island, Excel" /></Field>
-      <div style={styles.formRow}>
+      <div style={styles.formRow} className="form-row">
         <Field label="Number of courts">
           <input type="number" min="1" max="40" style={styles.input} value={f.courtCount}
             onChange={e => set('courtCount', e.target.value)} />
@@ -1174,19 +1188,19 @@ function VenueModal({ venue, knownBusinesses = [], onSave, onClose }) {
         <Info size={11} style={{ verticalAlign: '-1px', marginRight: 4 }} />
         On save, we'll create "Court 1" through "Court {f.courtCount || 1}" automatically if they don't exist yet. Existing courts are never removed or renamed this way — rename or add more from the venue's expanded row afterwards.
       </div>
-      <div style={styles.formRow}>
+      <div style={styles.formRow} className="form-row">
         <Field label="Province"><Select value={f.province} onChange={v => { set('province', v); set('district', PROVINCE_DISTRICTS[v][0]); }} options={PROVINCES} /></Field>
         <Field label="District"><Select value={f.district} onChange={v => set('district', v)} options={districts} /></Field>
       </div>
-      <div style={styles.formRow}>
+      <div style={styles.formRow} className="form-row">
         <Field label="City / Area"><input style={styles.input} value={f.city} onChange={e => set('city', e.target.value)} placeholder="e.g. Boralesgamuwa" /></Field>
         <Field label="Address"><input style={styles.input} value={f.address} onChange={e => set('address', e.target.value)} /></Field>
       </div>
-      <div style={styles.formRow}>
+      <div style={styles.formRow} className="form-row">
         <Field label="Latitude (optional)"><input style={styles.input} value={f.lat} onChange={e => set('lat', e.target.value)} placeholder="6.8845" /></Field>
         <Field label="Longitude (optional)"><input style={styles.input} value={f.lng} onChange={e => set('lng', e.target.value)} placeholder="79.8657" /></Field>
       </div>
-      <div style={styles.formRow}>
+      <div style={styles.formRow} className="form-row">
         <Field label="Opening time"><input type="time" style={styles.input} value={f.openingTime} onChange={e => set('openingTime', e.target.value)} /></Field>
         <Field label="Closing time"><input type="time" style={styles.input} value={f.closingTime} onChange={e => set('closingTime', e.target.value)} /></Field>
       </div>
@@ -1205,11 +1219,11 @@ function CourtModal({ court, venueId, existingCount, onSave, onClose }) {
   function set(k, v) { setF(prev => ({ ...prev, [k]: v })); }
   return (
     <Modal title={court ? 'Edit court' : 'Add court'} onClose={onClose}>
-      <div style={styles.formRow}>
+      <div style={styles.formRow} className="form-row">
         <Field label="Court name"><input style={styles.input} value={f.name} onChange={e => set('name', e.target.value)} /></Field>
         <Field label="Surface"><Select value={f.surface} onChange={v => set('surface', v)} options={COURT_SURFACES} /></Field>
       </div>
-      <div style={styles.formRow}>
+      <div style={styles.formRow} className="form-row">
         <Field label="Opening override (optional)"><input type="time" style={styles.input} value={f.openOverride} onChange={e => set('openOverride', e.target.value)} /></Field>
         <Field label="Closing override (optional)"><input type="time" style={styles.input} value={f.closeOverride} onChange={e => set('closeOverride', e.target.value)} /></Field>
       </div>
@@ -1220,8 +1234,8 @@ function CourtModal({ court, venueId, existingCount, onSave, onClose }) {
 
 function Modal({ title, onClose, children }) {
   return (
-    <div style={styles.modalOverlay} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={styles.modal}>
+    <div style={styles.modalOverlay} className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={styles.modal} className="modal-box">
         <div style={styles.modalHead}>
           <div style={{ fontWeight: 800, fontFamily: 'var(--font-display)' }}>{title}</div>
           <button style={styles.iconBtn} onClick={onClose}><X size={16} /></button>
@@ -1443,7 +1457,7 @@ function QuickPricingModal({ existingRules, venueCourtCount, onSave, onClose }) 
       <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 14, marginBottom: 14 }}>
         <div style={{ fontWeight: 800, fontSize: 12.5, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--muted)' }}>Weekday off-peak</div>
         <Field label="Off-peak price per hour (Rs)"><input type="number" style={styles.input} value={f.offPeakPrice} onChange={e => set('offPeakPrice', parseFloat(e.target.value) || 0)} /></Field>
-        <div style={styles.formRow}>
+        <div style={styles.formRow} className="form-row">
           <Field label="From"><input type="time" style={styles.input} value={f.offPeakStart} onChange={e => set('offPeakStart', e.target.value)} /></Field>
           <Field label="To"><input type="time" style={styles.input} value={f.offPeakEnd} onChange={e => set('offPeakEnd', e.target.value)} /></Field>
         </div>
@@ -1455,7 +1469,7 @@ function QuickPricingModal({ existingRules, venueCourtCount, onSave, onClose }) 
 
         {f.peakSlots.map((slot, i) => (
           <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginBottom: 4 }}>
-            <div style={styles.formRow}>
+            <div style={styles.formRow} className="form-row">
               <Field label={f.peakSlots.length > 1 ? `Slot ${i + 1} — From` : 'From'}>
                 <input type="time" style={styles.input} value={slot.start} onChange={e => setSlot(i, 'start', e.target.value)} />
               </Field>
@@ -1491,7 +1505,7 @@ function QuickPricingModal({ existingRules, venueCourtCount, onSave, onClose }) 
               This venue also has a cheaper weekend off-peak window. The rest of the weekend stays at your peak rate ({fmtMoney(f.peakPrice)}/hr).
             </div>
             <Field label="Weekend off-peak price per hour (Rs)"><input type="number" style={styles.input} value={f.weekendOffPeakPrice} onChange={e => set('weekendOffPeakPrice', parseFloat(e.target.value) || 0)} /></Field>
-            <div style={styles.formRow}>
+            <div style={styles.formRow} className="form-row">
               <Field label="From"><input type="time" style={styles.input} value={f.weekendOffPeakStart} onChange={e => set('weekendOffPeakStart', e.target.value)} /></Field>
               <Field label="To"><input type="time" style={styles.input} value={f.weekendOffPeakEnd} onChange={e => set('weekendOffPeakEnd', e.target.value)} /></Field>
             </div>
@@ -1558,11 +1572,11 @@ function PricingModal({ group, venueCourts, onSave, onClose }) {
 
       {!flatRate && (
         <>
-          <div style={styles.formRow}>
+          <div style={styles.formRow} className="form-row">
             <Field label="Applies on"><Select value={f.dayType} onChange={v => set('dayType', v)} options={DAY_TYPE_OPTIONS} /></Field>
             <Field label="Category"><Select value={f.category} onChange={v => set('category', v)} options={PRICING_CATEGORIES} /></Field>
           </div>
-          <div style={styles.formRow}>
+          <div style={styles.formRow} className="form-row">
             <Field label="Start time"><input type="time" style={styles.input} value={f.startTime} onChange={e => set('startTime', e.target.value)} /></Field>
             <Field label="End time"><input type="time" style={styles.input} value={f.endTime} onChange={e => set('endTime', e.target.value)} /></Field>
           </div>
@@ -1575,7 +1589,7 @@ function PricingModal({ group, venueCourts, onSave, onClose }) {
       )}
 
       <Field label="Price per hour (Rs)"><input type="number" style={styles.input} value={f.price} onChange={e => set('price', parseFloat(e.target.value) || 0)} /></Field>
-      <div style={styles.formRow}>
+      <div style={styles.formRow} className="form-row">
         <Field label="Effective from"><input type="date" style={styles.input} value={f.effectiveFrom} onChange={e => set('effectiveFrom', e.target.value)} /></Field>
         <Field label="Effective until (optional)"><input type="date" style={styles.input} value={f.effectiveUntil} onChange={e => set('effectiveUntil', e.target.value)} /></Field>
       </div>
@@ -1705,7 +1719,7 @@ function DayEntry({ ctx, venue, court, date, setDate }) {
         <LegendDot color="var(--ball)" label="Booked for event" />
       </div>
 
-      <div style={styles.hourGrid}>
+      <div style={styles.hourGrid} className="hour-grid">
         {hours.map((h, i) => {
           const bg = h.state === 'closed' ? 'var(--bg)' : h.state === 'occupied' ? 'var(--court)' : h.state === 'event' ? 'var(--ball)' : '#BFE0CC';
           return (
@@ -1726,7 +1740,7 @@ function DayEntry({ ctx, venue, court, date, setDate }) {
         })}
       </div>
 
-      <div style={styles.statGrid}>
+      <div style={styles.statGrid} className="stat-grid">
         <StatBlock label="Available hrs" value={avail} />
         <StatBlock label="Occupied hrs" value={occ} />
         <StatBlock label="Event hrs" value={evt} accent="var(--ball-dark)" />
@@ -1849,7 +1863,7 @@ function WeekEntry({ ctx, venue, court, anchor, setAnchor }) {
         </div>
       </Card>
 
-      <div style={styles.statGrid}>
+      <div style={styles.statGrid} className="stat-grid">
         <StatBlock label="Available hrs (week)" value={avail} />
         <StatBlock label="Occupied hrs (week)" value={occ} />
         <StatBlock label="Event hrs (week)" value={evt} accent="var(--ball-dark)" />
@@ -1996,7 +2010,7 @@ function RankingsTab({ ctx }) {
       </div>
 
       {rows.length === 0 ? <div style={styles.mutedNote}>No occupancy data logged for {monthLabel(monthKey)}{week !== '' ? `, ${weeks[Number(week)].label}` : ''} yet.</div> : (
-        <div style={styles.threeCol}>
+        <div style={styles.threeCol} className="three-col">
           <Card eyebrow="Business leaderboard" title="Top businesses">
             <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>Locations sharing a business name in Venues & Courts are combined here.</div>
             <RankList rows={byBusiness} metric={metric} fmt={fmt} />
@@ -2159,7 +2173,7 @@ function SpecialDayCard({ rows, master, aggregate }) {
       {!poya && !holiday ? (
         <div style={styles.mutedNote}>Mark Poya days or public holidays in the Calendar tab — once you've logged occupancy on and around them, this compares them against normal days of the same weekday.</div>
       ) : (
-        <div style={styles.twoCol}>
+        <div style={styles.twoCol} className="two-col">
           {[poya, holiday].filter(Boolean).map(x => (
             <div key={x.label}>
               <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8 }}>
@@ -2196,7 +2210,7 @@ function TrendsCard({ rows, aggregate }) {
   return (
     <Card eyebrow="Trends" title="Week & month over month" style={{ marginBottom: 16 }}>
       {!hasAny ? <div style={styles.mutedNote}>Not enough recent data to compare yet.</div> : (
-        <div style={styles.twoCol}>
+        <div style={styles.twoCol} className="two-col">
           <div>
             <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8 }}>This week vs last week</div>
             <ImpactRow label="Occupancy" a={wowThis.occupancyPct} b={wowLast.occupancyPct} fmt={fmtPct} />
@@ -2315,7 +2329,7 @@ function DataLogTab({ ctx }) {
 
   return (
     <TabWrap title="Data Log" eyebrow="Track when bookings were last checked & confirmed">
-      <div style={styles.statGrid}>
+      <div style={styles.statGrid} className="stat-grid">
         <StatBlock label="Confirmed through" value={latestCoveredTo ? fmtShortDate(latestCoveredTo) : '—'} accent="var(--court)" sub={latestCoveredTo ? `${latestCoveredTo}` : 'No check-ins logged yet'} />
         <StatBlock label="Last check-in" value={mostRecentCheck ? timeAgo(mostRecentCheck.checkedAt) : '—'} sub={mostRecentCheck ? new Date(mostRecentCheck.checkedAt).toLocaleString() : ''} />
         <StatBlock label="Total check-ins logged" value={logs.length} />
@@ -2323,10 +2337,10 @@ function DataLogTab({ ctx }) {
 
       {isAdmin && (
         <Card title="Log a check-in" eyebrow="Record what you just verified">
-          <div style={styles.formRow}>
+          <div style={styles.formRow} className="form-row">
             <Field label="Checked at"><input type="datetime-local" style={styles.input} value={checkedAt} onChange={e => setCheckedAt(e.target.value)} /></Field>
           </div>
-          <div style={styles.formRow}>
+          <div style={styles.formRow} className="form-row">
             <Field label="Covered from"><input type="date" style={styles.input} value={coveredFrom} onChange={e => setCoveredFrom(e.target.value)} /></Field>
             <Field label="Covered to"><input type="date" style={styles.input} value={coveredTo} onChange={e => setCoveredTo(e.target.value)} /></Field>
           </div>
@@ -2393,7 +2407,7 @@ function CalendarTab({ ctx }) {
     <TabWrap title="Calendar" eyebrow="Poya days, public holidays & special events">
       {isAdmin && (
         <Card title="Add a special day">
-          <div style={styles.formRow}>
+          <div style={styles.formRow} className="form-row">
             <Field label="Date"><input type="date" style={styles.input} value={date} onChange={e => setDate(e.target.value)} /></Field>
             <Field label="Type"><Select value={type} onChange={setType} options={SPECIAL_DAY_TYPES} /></Field>
           </div>
@@ -2451,6 +2465,53 @@ const GLOBAL_CSS = `
   input:focus, select:focus, textarea:focus { outline: 2px solid var(--court); outline-offset: 1px; }
   button:focus-visible { outline: 2px solid var(--court); outline-offset: 2px; }
   ::placeholder { color: #9DAAA5; }
+
+  /* ================= MOBILE ================= */
+  @media (max-width: 768px) {
+    html, body { overflow-x: hidden; }
+
+    .app-shell { flex-direction: column !important; min-height: 100vh; }
+
+    .app-sidebar {
+      width: 100% !important;
+      border-right: none !important;
+      border-bottom: 1px solid var(--border);
+      padding: 10px 14px !important;
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      background: #FBFCFB;
+    }
+    .app-brand-row { border-bottom: none !important; margin-bottom: 0 !important; padding: 2px 0 !important; }
+    .mobile-menu-btn { display: flex !important; }
+
+    .sidebar-panel { display: none; }
+    .sidebar-panel.mobile-open {
+      display: block;
+      margin-top: 12px;
+      max-height: calc(100vh - 70px);
+      overflow-y: auto;
+    }
+    .app-nav { flex-direction: column; }
+
+    .app-main { padding: 16px 14px 48px !important; }
+    h1 { font-size: 21px !important; }
+
+    .stat-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+    .two-col, .three-col { grid-template-columns: 1fr !important; }
+    .hour-grid { grid-template-columns: repeat(3, 1fr) !important; }
+    .form-row { flex-direction: column !important; gap: 0 !important; }
+
+    table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
+
+    .modal-overlay { padding: 0 !important; align-items: flex-end !important; }
+    .modal-box {
+      width: 100% !important;
+      max-width: 100% !important;
+      max-height: 92vh !important;
+      border-radius: 16px 16px 0 0 !important;
+    }
+  }
 `;
 
 const styles = {
@@ -2458,8 +2519,9 @@ const styles = {
   loadingWrap: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 400, color: 'var(--court)', fontFamily: 'var(--font-body)' },
 
   sidebar: { width: 232, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', padding: '18px 14px', background: '#FBFCFB' },
-  brand: { display: 'flex', alignItems: 'center', gap: 10, padding: '4px 6px 18px', borderBottom: '2px solid var(--ink)', marginBottom: 14 },
+  brand: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '4px 6px 18px', borderBottom: '2px solid var(--ink)', marginBottom: 14 },
   brandBall: { width: 18, height: 18, borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%, #F3DB7C, var(--ball))', flexShrink: 0, boxShadow: 'inset -2px -2px 0 rgba(0,0,0,0.12)' },
+  mobileMenuBtn: { display: 'none', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', cursor: 'pointer', flexShrink: 0 },
   brandTitle: { fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 15, letterSpacing: '.06em', lineHeight: 1 },
   brandSub: { fontSize: 10, color: 'var(--muted)', marginTop: 3, letterSpacing: '.01em' },
   nav: { display: 'flex', flexDirection: 'column', gap: 2, flex: 1 },
