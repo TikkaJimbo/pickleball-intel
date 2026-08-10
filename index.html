@@ -435,6 +435,15 @@ function App() {
     setSaving(false);
   }
 
+  async function clearBookingsOnly() {
+    setSaving(true);
+    for (const mk of Object.keys(occData)) {
+      try { await storageDelete('pbi_occ_' + mk); } catch (e) {}
+    }
+    setOccData({});
+    setSaving(false);
+  }
+
   // ---- flatten occupancy into analytics-friendly rows ----
   const flatRows = useMemo(() => {
     const rows = [];
@@ -478,7 +487,7 @@ function App() {
 
   const ctx = {
     master, setMaster: persistMaster, occData, setOccData, persistOccMonth,
-    flatRows, aggregate, saving, loadSample, clearAll,
+    flatRows, aggregate, saving, loadSample, clearAll, clearBookingsOnly,
   };
 
   if (loading) {
@@ -626,7 +635,7 @@ function Badge({ children, tone }) {
 ========================================================================= */
 
 function OverviewTab({ ctx }) {
-  const { master, flatRows, aggregate, loadSample, clearAll } = ctx;
+  const { master, flatRows, aggregate, loadSample, clearAll, clearBookingsOnly } = ctx;
   const today = todayStr();
   const last30 = addDaysStr(today, -30);
 
@@ -668,7 +677,12 @@ function OverviewTab({ ctx }) {
 
   return (
     <TabWrap title="Market Overview" eyebrow="Sri Lanka · National"
-      right={<button style={styles.ghostBtn} onClick={() => { if (confirm('Clear ALL data? This cannot be undone.')) clearAll(); }}>Clear all data</button>}>
+      right={
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button style={styles.ghostBtn} onClick={() => { if (confirm(`Erase all logged bookings (occupied/available hours) for every court?\n\nVenues, courts, pricing, and the calendar are kept exactly as they are — only the hour-by-hour booking records are cleared. This can't be undone.`)) clearBookingsOnly(); }}>Clear bookings only</button>
+          <button style={styles.ghostBtn} onClick={() => { if (confirm('Clear ALL data — venues, courts, pricing, calendar, and bookings? This cannot be undone.')) clearAll(); }}>Clear everything</button>
+        </div>
+      }>
 
       <div style={styles.statGrid}>
         <StatBlock label="Venues tracked" value={master.venues.length} />
