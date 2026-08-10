@@ -297,6 +297,63 @@ function dailySupplyHours(venue, master) {
   return dailyHours * courtCount;
 }
 
+function courtCountForVenueId(venueId, master) {
+  return master.courts.filter(c => c.venueId === venueId).length || 1;
+}
+
+// Operating-hour occupancy denominator: like the main 24h-basis calc, but
+// using each venue's ACTUAL declared opening hours for the days it was
+// logged, instead of a flat 24. A secondary metric alongside the main one.
+function computeOperatingHours(rows, master) {
+  const venueById = {};
+  master.venues.forEach(v => { venueById[v.id] = v; });
+  const venueDayPairs = new Set();
+  rows.forEach(r => venueDayPairs.add(r.venueId + '|' + r.date));
+  let hours = 0;
+  venueDayPairs.forEach(pair => {
+    const venueId = pair.split('|')[0];
+    const v = venueById[venueId];
+    if (!v) return;
+    hours += dailySupplyHours(v, master);
+  });
+  return hours;
+}
+
+function operatingStats(rows, master) {
+  const countable = rows.filter(r => r.state !== 'event');
+  const occupiedHours = countable.filter(r => r.occupied).length;
+  const revenue = countable.filter(r => r.occupied).reduce((s, r) => s + (r.price || 0), 0);
+  const operatingHours = computeOperatingHours(rows, master);
+  return {
+    operatingHours, occupiedHours, revenue,
+    operatingOccupancyPct: safeDiv(occupiedHours, operatingHours) * 100,
+    operatingRevPAH: safeDiv(revenue, operatingHours),
+  };
+}
+
+const PRIME_START_HOUR = 17; // 5 PM
+const PRIME_END_HOUR = 22;   // 10 PM (exclusive)
+function isPrimeRow(r) {
+  return !r.weekend && r.hour >= PRIME_START_HOUR && r.hour < PRIME_END_HOUR;
+}
+
+// Per-instance occupancy: groups rows by (venue, date, hour) and returns,
+// for each such instance, how many of that venue's tracked courts were
+// occupied at that specific hour. Used for saturation / full-market
+// frequency — these need to know "were ALL courts busy at once", which a
+// simple overall occupancy % can't tell you.
+function perInstanceOccupancy(rows) {
+  const buckets = {};
+  rows.forEach(r => {
+    if (r.state === 'event') return;
+    const key = r.venueId + '|' + r.date + '|' + r.hour;
+    if (!buckets[key]) buckets[key] = { venueId: r.venueId, date: r.date, hour: r.hour, weekend: r.weekend, total: 0, occupied: 0 };
+    buckets[key].total++;
+    if (r.occupied) buckets[key].occupied++;
+  });
+  return Object.values(buckets).map(b => ({ ...b, pct: safeDiv(b.occupied, b.total) * 100 }));
+}
+
 function matchPricingRule(rules, courtId, dateStr, hour) {
   const dow = dateToDow(dateStr);
   const weekend = dow === 0 || dow === 6;
@@ -835,6 +892,12 @@ function OverviewTab({ ctx }) {
   const recentAgg = aggregate(recentRows);
   const weekdayAgg = aggregate(weekdayRows);
   const weekendAgg = aggregate(weekendRows);
+  const recentOperating = operatingStats(recentRows, master);
+  const primeRows = recentRows.filter(isPrimeRow);
+  const primeAgg = aggregate(primeRows);
+  const weekendRatio = weekdayAgg.occupancyPct > 0 ? weekendAgg.occupancyPct / weekdayAgg.occupancyPct : null;
+  const totalCourts = master.courts.length || 1;
+  const demandPerCourt = recentAgg.occupiedHours / totalCourts / 30; // avg booked hrs/court/day over the window
 
   const byHourToday = Array.from({ length: 24 }, (_, h) => {
     const rows = todayRows.filter(r => r.hour === h);
@@ -877,7 +940,7 @@ function OverviewTab({ ctx }) {
 
       <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 14, display: 'flex', gap: 6 }}>
         <Info size={13} style={{ flexShrink: 0, marginTop: 1 }} />
-        Occupancy = total hours booked at a venue on a day ÷ (that venue's court count × 24). Every court counts toward the denominator whether or not it was logged that day — not the venue's declared opening hours. A quiet or unlogged court pulls occupancy down rather than being excluded, so venues compare on equal footing.
+        Two occupancy numbers, on purpose: <b>24h Utilization</b> = booked hours ÷ (court count × 24) — a fixed, fair comparison across venues regardless of stated hours. <b>Operating-Hr Occupancy</b> = booked hours ÷ each venue's actual declared opening hours — "when you're actually open, how full are you." A quiet or unlogged court still pulls both down rather than being excluded.
       </div>
 
       <div style={styles.statGrid} className="stat-grid">
@@ -887,6 +950,14 @@ function OverviewTab({ ctx }) {
         <StatBlock label="Today's occupancy" value={fmtPct(todayAgg.occupancyPct)} accent="var(--court)" />
         <StatBlock label="Today's estimated revenue" value={fmtMoney(todayAgg.revenue)} accent="var(--ball-dark)" />
         <StatBlock label="Busiest hour today" value={busiestHour ? hourLabel(busiestHour.h) : '—'} sub={busiestHour ? fmtPct(busiestHour.occupancyPct) + ' occupied' : ''} />
+      </div>
+
+      <div style={styles.statGrid} className="stat-grid">
+        <StatBlock label="24h Utilization (30d)" value={fmtPct(recentAgg.occupancyPct)} accent="var(--court)" sub="booked ÷ court count × 24" />
+        <StatBlock label="Operating-Hr Occupancy (30d)" value={fmtPct(recentOperating.operatingOccupancyPct)} accent="var(--court-dark)" sub="booked ÷ actual opening hours" />
+        <StatBlock label="Prime-time occupancy (30d)" value={fmtPct(primeAgg.occupancyPct)} accent="var(--ball-dark)" sub="weekdays, 5–10 PM" />
+        <StatBlock label="Demand per court (30d avg)" value={demandPerCourt.toFixed(1) + ' hrs/day'} sub="booked hrs ÷ courts ÷ days" />
+        <StatBlock label="Weekend : Weekday ratio" value={weekendRatio != null ? weekendRatio.toFixed(2) + '×' : '—'} sub="occupancy, weekend vs weekday" />
       </div>
 
       <div style={styles.twoCol} className="two-col">
@@ -1020,17 +1091,42 @@ function GeographyTab({ ctx }) {
   if (city) rows = rows.filter(r => r.city === city);
 
   const agg = aggregate(rows);
+  const operating = operatingStats(rows, master);
   const level = city ? 'city' : district ? 'district' : province ? 'province' : 'national';
 
   const groupKey = level === 'national' ? r => r.province
     : level === 'province' ? r => r.district
     : level === 'district' ? r => r.city
     : r => r.venueName;
+  const venueKeyFn = level === 'national' ? v => v.province
+    : level === 'province' ? v => v.district
+    : level === 'district' ? v => v.city
+    : v => v.name;
 
   const breakdown = groupAndAggregate(rows, groupKey, aggregate).sort((a, b) => b.occupancyPct - a.occupancyPct);
 
   const venuesInScope = master.venues.filter(v =>
     (!province || v.province === province) && (!district || v.district === district) && (!city || v.city === city));
+
+  const courtCountByKey = {};
+  let totalCourtsInScope = 0;
+  venuesInScope.forEach(v => {
+    const cc = courtCountForVenueId(v.id, master);
+    totalCourtsInScope += cc;
+    const k = venueKeyFn(v);
+    courtCountByKey[k] = (courtCountByKey[k] || 0) + cc;
+  });
+
+  const demandPerCourt = safeDiv(agg.occupiedHours, totalCourtsInScope);
+  const revenuePerCourt = safeDiv(agg.revenue, totalCourtsInScope);
+
+  let coveragePct = null, coverageSub = '';
+  if (monthKey !== 'all') {
+    const daysInPeriod = week !== '' ? (weeks[Number(week)].endDay - weeks[Number(week)].startDay + 1) : daysInMonth(monthKey);
+    const possibleCourtDays = (totalCourtsInScope || 1) * daysInPeriod;
+    coveragePct = safeDiv(agg.courtDays, possibleCourtDays) * 100;
+    coverageSub = `${agg.courtDays} of ${possibleCourtDays} possible court-days logged`;
+  }
 
   return (
     <TabWrap title="Geographic Drill-Down" eyebrow="Sri Lanka → Province → District → City → Venue → Court">
@@ -1044,24 +1140,27 @@ function GeographyTab({ ctx }) {
 
       <div style={styles.statGrid} className="stat-grid">
         <StatBlock label="Venues in scope" value={venuesInScope.length} />
-        <StatBlock label="Total court-hrs (24h basis)" value={agg.availableHours.toLocaleString()} sub={`${agg.venueDays} logged venue-day${agg.venueDays === 1 ? '' : 's'} × full court count`} />
         <StatBlock label="Occupied court-hrs" value={agg.occupiedHours.toLocaleString()} />
-        <StatBlock label="Occupancy" value={fmtPct(agg.occupancyPct)} accent="var(--court)" />
+        <StatBlock label="24h Utilization" value={fmtPct(agg.occupancyPct)} accent="var(--court)" />
+        <StatBlock label="Operating-Hr Occupancy" value={fmtPct(operating.operatingOccupancyPct)} accent="var(--court-dark)" sub="vs actual opening hours" />
         <StatBlock label="Est. revenue" value={fmtMoney(agg.revenue)} accent="var(--ball-dark)" />
-        <StatBlock label="RevPAH" value={fmtMoney(agg.revpah)} sub="revenue / hr, 24h basis" />
-        <StatBlock label="Event hrs" value={agg.eventHours.toLocaleString()} sub="booked for events, excluded above" />
+        <StatBlock label="RevPAH (24h)" value={fmtMoney(agg.revpah)} />
+        <StatBlock label="Demand per court" value={demandPerCourt.toFixed(1) + ' hrs'} sub="booked hrs ÷ courts in scope" />
+        <StatBlock label="Revenue per court" value={fmtMoney(revenuePerCourt)} />
+        <StatBlock label="Event hrs" value={agg.eventHours.toLocaleString()} sub="excluded from occupancy/revenue" />
+        {coveragePct != null && <StatBlock label="Data coverage" value={fmtPct(coveragePct)} sub={coverageSub} accent={coveragePct < 50 ? 'var(--danger)' : undefined} />}
       </div>
 
       <Card title={`Breakdown by ${level === 'national' ? 'province' : level === 'province' ? 'district' : level === 'district' ? 'city' : 'venue'}`}>
         {breakdown.length === 0 ? <div style={styles.mutedNote}>No occupancy data logged for {monthKey === 'all' ? 'this scope' : monthLabel(monthKey) + (week !== '' ? `, ${weeks[Number(week)].label}` : '')} yet.</div> : (
-          <BreakdownTable rows={breakdown} />
+          <BreakdownTable rows={breakdown} courtCountByKey={courtCountByKey} />
         )}
       </Card>
     </TabWrap>
   );
 }
 
-function BreakdownTable({ rows }) {
+function BreakdownTable({ rows, courtCountByKey = {} }) {
   return (
     <table style={styles.table}>
       <thead>
@@ -1069,27 +1168,32 @@ function BreakdownTable({ rows }) {
           <th style={styles.th}>Name</th>
           <th style={styles.th}>Occupancy</th>
           <th style={styles.th}>Occupied hrs</th>
-          <th style={styles.th}>Total hrs (24h)</th>
+          <th style={styles.th}>Demand/court</th>
           <th style={styles.th}>Est. revenue</th>
+          <th style={styles.th}>Revenue/court</th>
         </tr>
       </thead>
       <tbody>
-        {rows.map(r => (
-          <tr key={r.key}>
-            <td style={styles.td}><b>{r.key}</b></td>
-            <td style={styles.td}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ ...styles.miniBarTrack }}>
-                  <div style={{ ...styles.miniBarFill, width: `${Math.min(100, r.occupancyPct)}%` }} />
+        {rows.map(r => {
+          const courts = courtCountByKey[r.key] || 0;
+          return (
+            <tr key={r.key}>
+              <td style={styles.td}><b>{r.key}</b></td>
+              <td style={styles.td}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ ...styles.miniBarTrack }}>
+                    <div style={{ ...styles.miniBarFill, width: `${Math.min(100, r.occupancyPct)}%` }} />
+                  </div>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{fmtPct(r.occupancyPct)}</span>
                 </div>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{fmtPct(r.occupancyPct)}</span>
-              </div>
-            </td>
-            <td style={styles.td}>{r.occupiedHours.toLocaleString()}</td>
-            <td style={styles.td}>{r.availableHours.toLocaleString()}</td>
-            <td style={styles.td}>{fmtMoney(r.revenue)}</td>
-          </tr>
-        ))}
+              </td>
+              <td style={styles.td}>{r.occupiedHours.toLocaleString()}</td>
+              <td style={styles.td}>{courts > 0 ? (r.occupiedHours / courts).toFixed(1) + ' hrs' : '—'}</td>
+              <td style={styles.td}>{fmtMoney(r.revenue)}</td>
+              <td style={styles.td}>{courts > 0 ? fmtMoney(r.revenue / courts) : '—'}</td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
@@ -1961,6 +2065,7 @@ function HeatmapTab({ ctx }) {
   const [city, setCity] = useState('');
   const [venueId, setVenueId] = useState('');
   const [days, setDays] = useState(60);
+  const [mode, setMode] = useState('pct'); // 'pct' | 'count'
 
   const districts = province ? PROVINCE_DISTRICTS[province] : [...new Set(master.venues.map(v => v.district))];
   const cities = [...new Set(master.venues.filter(v => (!province || v.province === province) && (!district || v.district === district)).map(v => v.city))];
@@ -1981,15 +2086,20 @@ function HeatmapTab({ ctx }) {
     grid[colIdx][r.hour].avail++;
     if (r.occupied) grid[colIdx][r.hour].occ++;
   });
+  const maxCount = Math.max(1, ...grid.flat().map(c => c.occ));
 
   return (
-    <TabWrap title="24 × 7 Hotspot Heatmap" eyebrow="Occupied ÷ available court-hours">
+    <TabWrap title="24 × 7 Hotspot Heatmap" eyebrow={mode === 'pct' ? 'Occupied ÷ available court-hours' : 'Absolute booked courts per slot — the market demand curve'}>
       <div style={styles.filterRow}>
         <Select value={province} onChange={v => { setProvince(v); setDistrict(''); setCity(''); setVenueId(''); }} placeholder="All provinces" options={PROVINCES} />
         <Select value={district} onChange={v => { setDistrict(v); setCity(''); setVenueId(''); }} placeholder="All districts" options={districts} />
         <Select value={city} onChange={v => { setCity(v); setVenueId(''); }} placeholder="All cities" options={cities} />
         <Select value={venueId} onChange={setVenueId} placeholder="All venues" options={venueOptions.map(v => ({ value: v.id, label: v.name }))} />
         <Select value={String(days)} onChange={v => setDays(Number(v))} options={[{ value: '14', label: 'Last 14 days' }, { value: '30', label: 'Last 30 days' }, { value: '60', label: 'Last 60 days' }, { value: '90', label: 'Last 90 days' }]} />
+        <div style={styles.modeToggle}>
+          <button onClick={() => setMode('pct')} style={{ ...styles.modeToggleBtn, ...(mode === 'pct' ? styles.modeToggleBtnActive : {}) }}>% occupied</button>
+          <button onClick={() => setMode('count')} style={{ ...styles.modeToggleBtn, ...(mode === 'count' ? styles.modeToggleBtnActive : {}) }}>Booked courts</button>
+        </div>
       </div>
 
       {rows.length === 0 ? (
@@ -2005,6 +2115,16 @@ function HeatmapTab({ ctx }) {
                   <div style={styles.heatmapRowHead}>{hourLabel(h)}</div>
                   {DAY_SHORT.map((d, colIdx) => {
                     const cell = grid[colIdx][h];
+                    if (mode === 'count') {
+                      const frac = cell.occ / maxCount;
+                      const lvl = cell.occ > 0 ? hotspotFor(frac * 100) : null;
+                      return (
+                        <div key={d + h} title={`${d} ${hourLabel(h)}: ${cell.occ} court${cell.occ === 1 ? '' : 's'} booked`}
+                          style={{ ...styles.heatCell, background: lvl ? lvl.color : '#F1F1EE', opacity: cell.occ === 0 ? 0.4 : 1 }}>
+                          {cell.occ > 0 && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: lvl.max > 60 ? '#fff' : 'var(--ink)' }}>{cell.occ}</span>}
+                        </div>
+                      );
+                    }
                     const pct = cell.avail > 0 ? safeDiv(cell.occ, cell.avail) * 100 : null;
                     const lvl = pct != null ? hotspotFor(pct) : null;
                     return (
@@ -2018,6 +2138,7 @@ function HeatmapTab({ ctx }) {
               ))}
             </div>
           </div>
+          {mode === 'count' && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>Shading is relative to the busiest single slot in this view ({maxCount} courts) — not a fixed % scale.</div>}
           <div style={styles.legendRowWrap}>
             {HOTSPOT_LEVELS.map(l => (
               <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--muted)' }}>
@@ -2053,20 +2174,42 @@ function RankingsTab({ ctx }) {
     });
   }
 
-  const byVenue = groupAndAggregate(rows, r => r.venueName, aggregate)
-    .filter(r => r.availableHours > 0).sort((a, b) => b[metric] - a[metric]);
-  const byCity = groupAndAggregate(rows, r => r.city, aggregate)
-    .filter(r => r.availableHours > 0).sort((a, b) => b[metric] - a[metric]);
-  const byBusiness = groupAndAggregate(rows, r => r.business, aggregate)
-    .filter(r => r.availableHours > 0).sort((a, b) => b[metric] - a[metric]);
+  function courtCountByKeyFn(keyFn) {
+    const map = {};
+    master.venues.forEach(v => {
+      const k = keyFn(v);
+      if (!k) return;
+      map[k] = (map[k] || 0) + courtCountForVenueId(v.id, master);
+    });
+    return map;
+  }
+  function withPerCourt(list, courtMap) {
+    return list.map(g => ({
+      ...g,
+      demandPerCourt: courtMap[g.key] ? g.occupiedHours / courtMap[g.key] : 0,
+      revenuePerCourt: courtMap[g.key] ? g.revenue / courtMap[g.key] : 0,
+    }));
+  }
+
+  const byVenue = withPerCourt(groupAndAggregate(rows, r => r.venueName, aggregate).filter(r => r.availableHours > 0), courtCountByKeyFn(v => v.name))
+    .sort((a, b) => b[metric] - a[metric]);
+  const byCity = withPerCourt(groupAndAggregate(rows, r => r.city, aggregate).filter(r => r.availableHours > 0), courtCountByKeyFn(v => v.city))
+    .sort((a, b) => b[metric] - a[metric]);
+  const byBusiness = withPerCourt(groupAndAggregate(rows, r => r.business, aggregate).filter(r => r.availableHours > 0), courtCountByKeyFn(v => v.business || v.name))
+    .sort((a, b) => b[metric] - a[metric]);
 
   const metricOptions = [
     { value: 'occupancyPct', label: 'Occupancy %' },
     { value: 'revenue', label: 'Estimated revenue' },
     { value: 'revpah', label: 'RevPAH' },
     { value: 'occupiedHours', label: 'Occupied court-hours' },
+    { value: 'demandPerCourt', label: 'Demand per court (hrs)' },
+    { value: 'revenuePerCourt', label: 'Revenue per court' },
   ];
-  const fmt = (v, key) => key === 'occupancyPct' ? fmtPct(v) : key === 'revenue' || key === 'revpah' ? fmtMoney(v) : v.toLocaleString();
+  const fmt = (v, key) => key === 'occupancyPct' ? fmtPct(v)
+    : key === 'revenue' || key === 'revpah' || key === 'revenuePerCourt' ? fmtMoney(v)
+    : key === 'demandPerCourt' ? v.toFixed(1) + ' hrs'
+    : v.toLocaleString();
 
   return (
     <TabWrap title="Rankings" eyebrow="Venues, cities & businesses — by the booking's own date, not when it was entered">
@@ -2324,10 +2467,250 @@ function InsightsTab({ ctx }) {
       </div>
 
       <PeakMixCard master={master} rows={rows} aggregate={aggregate} />
+      <PrimeTimeCard rows={rows} aggregate={aggregate} />
+      <CapacityPressureCard rows={rows} />
+      <PricePerformanceCard rows={rows} aggregate={aggregate} />
+      <EventEffectCard rows={rows} />
+      <OpportunityMatrixCard rows={rows} aggregate={aggregate} scopeVenues={scopeVenues} master={master} />
       <SpecialDayCard rows={rows} master={master} aggregate={aggregate} />
       <TrendsCard rows={rows} aggregate={aggregate} />
       <MarketShareCard rows={rows} aggregate={aggregate} master={master} scopeVenues={scopeVenues} />
     </TabWrap>
+  );
+}
+
+function PrimeTimeCard({ rows, aggregate }) {
+  const primeRows = rows.filter(isPrimeRow);
+  const prime = aggregate(primeRows);
+  const overall = aggregate(rows);
+  return (
+    <Card eyebrow="Prime time" title="5–10 PM weekdays" style={{ marginBottom: 16 }}>
+      {primeRows.length === 0 ? <div style={styles.mutedNote}>No prime-time data logged for this scope yet.</div> : (
+        <>
+          <div style={styles.statGrid} className="stat-grid">
+            <StatBlock label="Prime occupancy" value={fmtPct(prime.occupancyPct)} accent="var(--court)" />
+            <StatBlock label="Prime RevPAH" value={fmtMoney(prime.revpah)} />
+            <StatBlock label="Prime booked hrs" value={prime.occupiedHours.toLocaleString()} />
+            <StatBlock label="Overall occupancy" value={fmtPct(overall.occupancyPct)} sub="for comparison" />
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+            {prime.occupancyPct > overall.occupancyPct
+              ? `Prime time runs ${(prime.occupancyPct - overall.occupancyPct).toFixed(0)} points hotter than the overall average — this is likely where any capacity crunch actually bites.`
+              : `Prime time isn't meaningfully busier than the rest of the day in this scope yet.`}
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
+function CapacityPressureCard({ rows }) {
+  const primeInstances = perInstanceOccupancy(rows).filter(i => isPrimeRow({ weekend: i.weekend, hour: i.hour }));
+  const total = primeInstances.length;
+  const band = (min) => total > 0 ? safeDiv(primeInstances.filter(i => i.pct >= min).length, total) * 100 : 0;
+  const bands = [
+    { label: '≥ 70% full', pct: band(70) },
+    { label: '≥ 80% full', pct: band(80) },
+    { label: '≥ 90% full', pct: band(90) },
+    { label: '100% full', pct: band(100) },
+  ];
+
+  const allInstances = perInstanceOccupancy(rows);
+  const byDowHour = {};
+  allInstances.forEach(i => {
+    const dow = dateToDow(i.date);
+    const key = dow + '|' + i.hour;
+    if (!byDowHour[key]) byDowHour[key] = { dow, hour: i.hour, total: 0, full: 0 };
+    byDowHour[key].total++;
+    if (i.pct >= 100) byDowHour[key].full++;
+  });
+  const topSaturated = Object.values(byDowHour)
+    .filter(x => x.total >= 3)
+    .map(x => ({ ...x, freqPct: safeDiv(x.full, x.total) * 100 }))
+    .sort((a, b) => b.freqPct - a.freqPct)
+    .slice(0, 5);
+
+  return (
+    <Card eyebrow="Capacity pressure" title="Prime-time saturation" style={{ marginBottom: 16 }}>
+      {total === 0 ? <div style={styles.mutedNote}>No prime-time data logged for this scope yet.</div> : (
+        <>
+          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 16 }}>
+            {bands.map(b => (
+              <div key={b.label} style={{ textAlign: 'center' }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 20, fontWeight: 800, color: b.pct >= 50 ? 'var(--danger)' : 'var(--ink)' }}>{fmtPct(b.pct)}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{b.label}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>Share of logged prime-time hour-instances (one venue, one date, one hour) at or above each fullness threshold. This is a proxy for capacity pressure, not a direct measure of turned-away customers.</div>
+          {topSaturated.length > 0 && (
+            <>
+              <div style={{ fontWeight: 800, fontSize: 12.5, marginTop: 10, marginBottom: 8 }}>Most consistently fully-booked slots</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {topSaturated.map(x => (
+                  <div key={x.dow + '-' + x.hour} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, borderBottom: '1px solid var(--border)', paddingBottom: 6 }}>
+                    <span>{DAY_NAMES[x.dow]} {hourLabel(x.hour)}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)' }}>{fmtPct(x.freqPct)} full ({x.full}/{x.total} times logged)</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
+function PricePerformanceCard({ rows, aggregate }) {
+  const overall = aggregate(rows);
+  const byVenue = groupAndAggregate(rows, r => r.venueName, aggregate).filter(v => v.occupiedHours > 0);
+  const withPremiums = byVenue.map(v => ({
+    ...v,
+    pricePremium: overall.avgRate > 0 ? v.avgRate / overall.avgRate : null,
+    occPremium: overall.occupancyPct > 0 ? v.occupancyPct / overall.occupancyPct : null,
+  })).sort((a, b) => (b.pricePremium || 0) - (a.pricePremium || 0));
+
+  return (
+    <Card eyebrow="Pricing power" title="Price premium vs occupancy performance" style={{ marginBottom: 16 }}>
+      {withPremiums.length === 0 ? <div style={styles.mutedNote}>No data for this scope yet.</div> : (
+        <>
+          <table style={styles.table}>
+            <thead><tr>
+              <th style={styles.th}>Venue</th><th style={styles.th}>Avg realized rate</th>
+              <th style={styles.th}>Price premium</th><th style={styles.th}>Occupancy premium</th>
+            </tr></thead>
+            <tbody>
+              {withPremiums.map(v => (
+                <tr key={v.key}>
+                  <td style={styles.td}><b>{v.key}</b></td>
+                  <td style={{ ...styles.td, fontFamily: 'var(--font-mono)' }}>{fmtMoney(v.avgRate)}</td>
+                  <td style={styles.td}>{v.pricePremium != null ? <span style={{ fontWeight: 700, color: v.pricePremium >= 1 ? '#1F6B44' : 'var(--danger)' }}>{v.pricePremium.toFixed(2)}×</span> : '—'}</td>
+                  <td style={styles.td}>{v.occPremium != null ? <span style={{ fontWeight: 700, color: v.occPremium >= 1 ? '#1F6B44' : 'var(--danger)' }}>{v.occPremium.toFixed(2)}×</span> : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
+            Both premiums are relative to the scope average (1.00× = average). Above 1.0× on both means a venue is successfully commanding a higher rate without losing demand; a high price premium with occupancy below 1.0× suggests it may be priced beyond what that market bears.
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
+function EventEffectCard({ rows }) {
+  const eventRows = rows.filter(r => r.state === 'event');
+  const totalLoggedHours = rows.length;
+  const eventShare = safeDiv(eventRows.length, totalLoggedHours) * 100;
+
+  const byVenue = {};
+  eventRows.forEach(r => { byVenue[r.venueName] = (byVenue[r.venueName] || 0) + 1; });
+  const topEventVenues = Object.entries(byVenue).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  return (
+    <Card eyebrow="Events" title="Event-hour effect" style={{ marginBottom: 16 }}>
+      {eventRows.length === 0 ? <div style={styles.mutedNote}>No event-booked hours logged in this scope.</div> : (
+        <>
+          <div style={styles.statGrid} className="stat-grid">
+            <StatBlock label="Total event hrs" value={eventRows.length.toLocaleString()} />
+            <StatBlock label="Share of all logged hours" value={fmtPct(eventShare)} sub="commercial occupancy already excludes these" />
+          </div>
+          {topEventVenues.length > 0 && (
+            <>
+              <div style={{ fontWeight: 800, fontSize: 12.5, marginTop: 6, marginBottom: 8 }}>Most event-heavy venues</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {topEventVenues.map(([name, count]) => (
+                  <div key={name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, borderBottom: '1px solid var(--border)', paddingBottom: 6 }}>
+                    <span>{name}</span><span style={{ fontFamily: 'var(--font-mono)' }}>{count} hrs</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
+            A venue hosting frequent tournaments/events can look artificially "less occupied" commercially, since event hours are excluded from the main occupancy number — this is where to check whether that's happening.
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
+function OpportunityMatrixCard({ rows, aggregate, scopeVenues, master }) {
+  const byCityVenues = {};
+  scopeVenues.forEach(v => {
+    if (!byCityVenues[v.city]) byCityVenues[v.city] = [];
+    byCityVenues[v.city].push(v);
+  });
+  const byCityRows = {};
+  rows.forEach(r => { if (!byCityRows[r.city]) byCityRows[r.city] = []; byCityRows[r.city].push(r); });
+
+  const points = Object.keys(byCityVenues).map(city => {
+    const venues = byCityVenues[city];
+    const supply = venues.reduce((s, v) => s + dailySupplyHours(v, master), 0);
+    const agg = aggregate(byCityRows[city] || []);
+    return { city, supply, demand: agg.occupancyPct };
+  }).filter(p => p.supply > 0);
+
+  if (points.length < 2) {
+    return (
+      <Card eyebrow="Opportunity" title="Market Opportunity Matrix" style={{ marginBottom: 16 }}>
+        <div style={styles.mutedNote}>Need at least 2 cities with data in this scope to plot a comparison.</div>
+      </Card>
+    );
+  }
+
+  const supplies = [...points.map(p => p.supply)].sort((a, b) => a - b);
+  const demands = [...points.map(p => p.demand)].sort((a, b) => a - b);
+  const medianSupply = supplies[Math.floor(supplies.length / 2)];
+  const medianDemand = demands[Math.floor(demands.length / 2)];
+  const maxSupply = Math.max(...points.map(p => p.supply)) * 1.15 || 1;
+  const maxDemand = Math.max(...points.map(p => p.demand), 10) * 1.15;
+
+  const W = 560, H = 340, PAD = 40;
+  const xScale = (v) => PAD + (v / maxSupply) * (W - PAD * 2);
+  const yScale = (v) => H - PAD - (v / maxDemand) * (H - PAD * 2);
+
+  function quadrantColor(p) {
+    if (p.supply < medianSupply && p.demand >= medianDemand) return '#1F6B44';
+    if (p.supply >= medianSupply && p.demand >= medianDemand) return '#235E73';
+    if (p.supply < medianSupply && p.demand < medianDemand) return '#9DAAA5';
+    return '#B8503F';
+  }
+
+  return (
+    <Card eyebrow="Opportunity" title="Market Opportunity Matrix — supply vs demand by city" style={{ marginBottom: 16 }}>
+      <div style={{ overflowX: 'auto' }}>
+        <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ maxWidth: 560, display: 'block' }}>
+          <line x1={PAD} y1={PAD} x2={PAD} y2={H - PAD} stroke="var(--border)" />
+          <line x1={PAD} y1={H - PAD} x2={W - PAD} y2={H - PAD} stroke="var(--border)" />
+          <line x1={xScale(medianSupply)} y1={PAD} x2={xScale(medianSupply)} y2={H - PAD} stroke="var(--border)" strokeDasharray="4 4" />
+          <line x1={PAD} y1={yScale(medianDemand)} x2={W - PAD} y2={yScale(medianDemand)} stroke="var(--border)" strokeDasharray="4 4" />
+          <text x={PAD + 6} y={PAD + 14} fontSize="10" fill="var(--muted)">High demand</text>
+          <text x={PAD + 6} y={H - PAD - 6} fontSize="10" fill="var(--muted)">Low demand</text>
+          <text x={W - PAD - 68} y={H - PAD + 22} fontSize="10" fill="var(--muted)">High supply →</text>
+          <text x={PAD} y={H - PAD + 22} fontSize="10" fill="var(--muted)">← Low supply</text>
+          {points.map(p => (
+            <g key={p.city}>
+              <circle cx={xScale(p.supply)} cy={yScale(p.demand)} r={6} fill={quadrantColor(p)} stroke="#fff" strokeWidth="1.5" />
+              <text x={xScale(p.supply) + 8} y={yScale(p.demand) + 4} fontSize="10" fill="var(--ink)">{p.city}</text>
+            </g>
+          ))}
+        </svg>
+      </div>
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 10 }}>
+        {[{ l: 'Expansion opportunity', c: '#1F6B44' }, { l: 'Mature / strong', c: '#235E73' }, { l: 'Emerging / weak', c: '#9DAAA5' }, { l: 'Oversupplied', c: '#B8503F' }].map(x => (
+          <div key={x.l} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--muted)' }}>
+            <span style={{ width: 9, height: 9, borderRadius: '50%', background: x.c }} /> {x.l}
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
+        X = fixed daily court-hour capacity per city, Y = 24h utilization %. The dividing lines sit at the median across cities in this scope — quadrants are relative to your own tracked markets, not an absolute external benchmark.
+      </div>
+    </Card>
   );
 }
 
@@ -2413,15 +2796,24 @@ function SpecialDayCard({ rows, master, aggregate }) {
         <div style={styles.mutedNote}>Mark Poya days or public holidays in the Calendar tab — once you've logged occupancy on and around them, this compares them against normal days of the same weekday.</div>
       ) : (
         <div style={styles.twoCol} className="two-col">
-          {[poya, holiday].filter(Boolean).map(x => (
-            <div key={x.label}>
-              <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8 }}>
-                {x.label} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>({x.specialDayCount} day{x.specialDayCount === 1 ? '' : 's'} logged)</span>
+          {[poya, holiday].filter(Boolean).map(x => {
+            const effectIndex = x.baselineAgg.occupancyPct > 0 ? (x.specialAgg.occupancyPct / x.baselineAgg.occupancyPct) * 100 : null;
+            return (
+              <div key={x.label}>
+                <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8 }}>
+                  {x.label} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>({x.specialDayCount} day{x.specialDayCount === 1 ? '' : 's'} logged)</span>
+                </div>
+                {effectIndex != null && (
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 800, color: effectIndex >= 100 ? '#1F6B44' : 'var(--danger)' }}>{effectIndex.toFixed(0)}</span>
+                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>Effect Index (normal day = 100)</span>
+                  </div>
+                )}
+                <ImpactRow label="Occupancy" a={x.specialAgg.occupancyPct} b={x.baselineAgg.occupancyPct} fmt={fmtPct} />
+                <ImpactRow label="Avg daily revenue" a={x.specialAvgDailyRevenue} b={x.baselineAvgDailyRevenue} fmt={fmtMoney} />
               </div>
-              <ImpactRow label="Occupancy" a={x.specialAgg.occupancyPct} b={x.baselineAgg.occupancyPct} fmt={fmtPct} />
-              <ImpactRow label="Avg daily revenue" a={x.specialAvgDailyRevenue} b={x.baselineAvgDailyRevenue} fmt={fmtMoney} />
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </Card>
