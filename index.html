@@ -208,6 +208,19 @@ function monthOptions(pastCount = 8, futureCount = 11) {
   }
   return opts;
 }
+function timeAgo(isoString) {
+  if (!isoString) return '—';
+  const then = new Date(isoString).getTime();
+  const now = Date.now();
+  const diffMs = now - then;
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min${mins === 1 ? '' : 's'} ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hr${hrs === 1 ? '' : 's'} ago`;
+  const days = Math.round(hrs / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
 function daysInMonth(yyyyMm) {
   const [y, m] = yyyyMm.split('-').map(Number);
   return new Date(y, m, 0).getDate();
@@ -314,7 +327,15 @@ function hotspotFor(pct) {
 
 const MASTER_KEY = 'pbi_master_v1';
 
-const emptyMaster = () => ({ venues: [], courts: [], pricing: [], specialDays: {} });
+// ---- ADMIN PASSWORD ----
+// Change this to your own password. This is a simple deterrent, not real
+// security — it stops casual/accidental edits by friends viewing the link,
+// but anyone who reads the page source can find this value. Don't use a
+// password you use anywhere else.
+const ADMIN_PASSWORD = 'pickleball2026';
+const ADMIN_STORAGE_KEY = 'pbi_admin_session';
+
+const emptyMaster = () => ({ venues: [], courts: [], pricing: [], specialDays: {}, checkLogs: [] });
 
 /* =========================================================================
    SAMPLE DATA
@@ -398,6 +419,7 @@ const TABS = [
   { id: 'heatmap', label: 'Heatmap', icon: Grid3x3 },
   { id: 'rankings', label: 'Rankings', icon: Trophy },
   { id: 'insights', label: 'Insights', icon: TrendingUp },
+  { id: 'checklog', label: 'Data Log', icon: Check },
   { id: 'calendar', label: 'Calendar', icon: CalendarIcon },
 ];
 
@@ -408,6 +430,22 @@ function App() {
   const [master, setMaster] = useState(emptyMaster());
   const [occData, setOccData] = useState({}); // { monthKey: { courtId: { date: [24] } } }
   const loadedMonths = useRef(new Set());
+  const [isAdmin, setIsAdmin] = useState(() => {
+    try { return localStorage.getItem(ADMIN_STORAGE_KEY) === 'true'; } catch (e) { return false; }
+  });
+
+  function adminLogin(password) {
+    if (password === ADMIN_PASSWORD) {
+      setIsAdmin(true);
+      try { localStorage.setItem(ADMIN_STORAGE_KEY, 'true'); } catch (e) {}
+      return true;
+    }
+    return false;
+  }
+  function adminLogout() {
+    setIsAdmin(false);
+    try { localStorage.removeItem(ADMIN_STORAGE_KEY); } catch (e) {}
+  }
 
   useEffect(() => { loadAll(); }, []);
 
@@ -415,7 +453,10 @@ function App() {
     setLoading(true);
     const m = await storageGet(MASTER_KEY, true);
     if (m) {
-      try { setMaster(JSON.parse(m)); } catch (e) { setMaster(emptyMaster()); }
+      try {
+        const parsed = JSON.parse(m);
+        setMaster({ ...emptyMaster(), ...parsed });
+      } catch (e) { setMaster(emptyMaster()); }
     }
     const keys = await storageList('pbi_occ_', true);
     const occ = {};
@@ -525,6 +566,7 @@ function App() {
   const ctx = {
     master, setMaster: persistMaster, occData, setOccData, persistOccMonth,
     flatRows, aggregate, saving, loadSample, clearAll, clearBookingsOnly,
+    isAdmin,
   };
 
   if (loading) {
@@ -540,7 +582,7 @@ function App() {
   return (
     <div style={styles.app}>
       <style>{GLOBAL_CSS}</style>
-      <Sidebar tab={tab} setTab={setTab} venueCount={master.venues.length} saving={saving} />
+      <Sidebar tab={tab} setTab={setTab} venueCount={master.venues.length} saving={saving} isAdmin={isAdmin} adminLogin={adminLogin} adminLogout={adminLogout} />
       <main style={styles.main}>
         {tab === 'overview' && <OverviewTab ctx={ctx} />}
         {tab === 'geography' && <GeographyTab ctx={ctx} />}
@@ -550,6 +592,7 @@ function App() {
         {tab === 'heatmap' && <HeatmapTab ctx={ctx} />}
         {tab === 'rankings' && <RankingsTab ctx={ctx} />}
         {tab === 'insights' && <InsightsTab ctx={ctx} />}
+        {tab === 'checklog' && <DataLogTab ctx={ctx} />}
         {tab === 'calendar' && <CalendarTab ctx={ctx} />}
       </main>
     </div>
@@ -560,7 +603,17 @@ function App() {
    SIDEBAR
 ========================================================================= */
 
-function Sidebar({ tab, setTab, venueCount, saving }) {
+function Sidebar({ tab, setTab, venueCount, saving, isAdmin, adminLogin, adminLogout }) {
+  const [showLogin, setShowLogin] = useState(false);
+  const [pw, setPw] = useState('');
+  const [err, setErr] = useState(false);
+
+  function submitLogin(e) {
+    e.preventDefault();
+    if (adminLogin(pw)) { setShowLogin(false); setPw(''); setErr(false); }
+    else { setErr(true); }
+  }
+
   return (
     <aside style={styles.sidebar}>
       <div style={styles.brand}>
@@ -591,8 +644,29 @@ function Sidebar({ tab, setTab, venueCount, saving }) {
         <div style={{ fontSize: 11, color: saving ? 'var(--ball)' : 'var(--muted)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
           {saving ? <><Loader2 size={11} className="spin" /> Saving…</> : <><Check size={11} /> Synced</>}
         </div>
-        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 8, opacity: 0.75 }}>
-          Data is shared with everyone using this app.
+
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+          {isAdmin ? (
+            <div>
+              <Badge tone="off_peak">Admin mode</Badge>
+              <button style={{ ...styles.ghostBtn, marginTop: 8, width: '100%', justifyContent: 'center', fontSize: 11.5, padding: '6px 10px' }} onClick={adminLogout}>Log out</button>
+            </div>
+          ) : showLogin ? (
+            <form onSubmit={submitLogin}>
+              <input type="password" autoFocus value={pw} onChange={e => { setPw(e.target.value); setErr(false); }}
+                placeholder="Admin password" style={{ ...styles.input, fontSize: 12.5, padding: '6px 8px', width: '100%' }} />
+              {err && <div style={{ fontSize: 10.5, color: 'var(--danger)', marginTop: 4 }}>Wrong password.</div>}
+              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                <button type="submit" style={{ ...styles.primaryBtn, fontSize: 11.5, padding: '6px 10px', flex: 1, justifyContent: 'center' }}>Log in</button>
+                <button type="button" style={{ ...styles.ghostBtn, fontSize: 11.5, padding: '6px 10px' }} onClick={() => { setShowLogin(false); setPw(''); setErr(false); }}>Cancel</button>
+              </div>
+            </form>
+          ) : (
+            <button style={{ ...styles.ghostBtn, width: '100%', justifyContent: 'center', fontSize: 11.5, padding: '6px 10px' }} onClick={() => setShowLogin(true)}>Admin login</button>
+          )}
+          <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 8, opacity: 0.75 }}>
+            {isAdmin ? 'You can add and edit data.' : 'View-only — log in to add or edit data.'}
+          </div>
         </div>
       </div>
     </aside>
@@ -672,7 +746,7 @@ function Badge({ children, tone }) {
 ========================================================================= */
 
 function OverviewTab({ ctx }) {
-  const { master, flatRows, aggregate, loadSample, clearAll, clearBookingsOnly } = ctx;
+  const { master, flatRows, aggregate, loadSample, clearAll, clearBookingsOnly, isAdmin } = ctx;
   const today = todayStr();
   const last30 = addDaysStr(today, -30);
 
@@ -702,11 +776,13 @@ function OverviewTab({ ctx }) {
     return (
       <TabWrap title="Market Overview" eyebrow="Sri Lanka · National">
         <EmptyState icon={Sparkles} title="No data yet"
-          body="Add your first venue, or load sample data to explore every screen before you start entering real courts."
+          body={isAdmin ? "Add your first venue, or load sample data to explore every screen before you start entering real courts." : "No venues have been added yet. Log in as admin (bottom of the sidebar) to set this up."}
           action={
-            <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-              <button style={styles.primaryBtn} onClick={loadSample}>Load sample data</button>
-            </div>
+            isAdmin ? (
+              <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                <button style={styles.primaryBtn} onClick={loadSample}>Load sample data</button>
+              </div>
+            ) : null
           } />
       </TabWrap>
     );
@@ -715,10 +791,12 @@ function OverviewTab({ ctx }) {
   return (
     <TabWrap title="Market Overview" eyebrow="Sri Lanka · National"
       right={
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button style={styles.ghostBtn} onClick={() => { if (confirm(`Erase all logged bookings (occupied/available hours) for every court?\n\nVenues, courts, pricing, and the calendar are kept exactly as they are — only the hour-by-hour booking records are cleared. This can't be undone.`)) clearBookingsOnly(); }}>Clear bookings only</button>
-          <button style={styles.ghostBtn} onClick={() => { if (confirm('Clear ALL data — venues, courts, pricing, calendar, and bookings? This cannot be undone.')) clearAll(); }}>Clear everything</button>
-        </div>
+        isAdmin ? (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button style={styles.ghostBtn} onClick={() => { if (confirm(`Erase all logged bookings (occupied/available hours) for every court?\n\nVenues, courts, pricing, and the calendar are kept exactly as they are — only the hour-by-hour booking records are cleared. This can't be undone.`)) clearBookingsOnly(); }}>Clear bookings only</button>
+            <button style={styles.ghostBtn} onClick={() => { if (confirm('Clear ALL data — venues, courts, pricing, calendar, and bookings? This cannot be undone.')) clearAll(); }}>Clear everything</button>
+          </div>
+        ) : null
       }>
 
       <div style={styles.statGrid}>
@@ -941,7 +1019,7 @@ function BreakdownTable({ rows }) {
 ========================================================================= */
 
 function VenuesTab({ ctx }) {
-  const { master, setMaster, loadSample } = ctx;
+  const { master, setMaster, loadSample, isAdmin } = ctx;
   const [editingVenue, setEditingVenue] = useState(null); // null = closed, 'new' = new, obj = editing
   const [expanded, setExpanded] = useState(null);
   const [editingCourt, setEditingCourt] = useState(null); // {venueId, court|'new'}
@@ -993,12 +1071,12 @@ function VenuesTab({ ctx }) {
 
   return (
     <TabWrap title="Venues & Courts" eyebrow="Master data"
-      right={<button style={styles.primaryBtn} onClick={() => setEditingVenue('new')}><Plus size={14} /> Add venue</button>}>
+      right={isAdmin ? <button style={styles.primaryBtn} onClick={() => setEditingVenue('new')}><Plus size={14} /> Add venue</button> : null}>
 
       {master.venues.length === 0 && (
         <EmptyState icon={Building2} title="No venues yet"
-          body="Add your first venue manually, or load realistic sample data (3 venues, 9 courts, pricing & 2 weeks of occupancy) to explore the app."
-          action={<button style={{ ...styles.primaryBtn, marginTop: 14 }} onClick={loadSample}>Load sample data</button>} />
+          body={isAdmin ? "Add your first venue manually, or load realistic sample data (3 venues, 9 courts, pricing & 2 weeks of occupancy) to explore the app." : "No venues have been added yet."}
+          action={isAdmin ? <button style={{ ...styles.primaryBtn, marginTop: 14 }} onClick={loadSample}>Load sample data</button> : null} />
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1018,8 +1096,8 @@ function VenuesTab({ ctx }) {
                     {v.city} · {v.district} · {v.province} · {vCourts.length} court{vCourts.length === 1 ? '' : 's'} · {v.type.replace('_', ' ')}
                   </div>
                 </div>
-                <button style={styles.iconBtn} onClick={e => { e.stopPropagation(); setEditingVenue(v); }}><Edit2 size={14} /></button>
-                <button style={styles.iconBtn} onClick={e => { e.stopPropagation(); deleteVenue(v.id); }}><Trash2 size={14} /></button>
+                {isAdmin && <button style={styles.iconBtn} onClick={e => { e.stopPropagation(); setEditingVenue(v); }}><Edit2 size={14} /></button>}
+                {isAdmin && <button style={styles.iconBtn} onClick={e => { e.stopPropagation(); deleteVenue(v.id); }}><Trash2 size={14} /></button>}
               </div>
               {isOpen && (
                 <div style={styles.venueBody}>
@@ -1033,13 +1111,15 @@ function VenuesTab({ ctx }) {
                           {c.surface} · {c.openOverride || 'venue hours'}–{c.closeOverride || ''}
                         </span>
                       </div>
-                      <button style={styles.iconBtnSm} onClick={() => setEditingCourt({ venueId: v.id, court: c })}><Edit2 size={12} /></button>
-                      <button style={styles.iconBtnSm} onClick={() => deleteCourt(c.id)}><Trash2 size={12} /></button>
+                      {isAdmin && <button style={styles.iconBtnSm} onClick={() => setEditingCourt({ venueId: v.id, court: c })}><Edit2 size={12} /></button>}
+                      {isAdmin && <button style={styles.iconBtnSm} onClick={() => deleteCourt(c.id)}><Trash2 size={12} /></button>}
                     </div>
                   ))}
-                  <button style={{ ...styles.ghostBtn, marginTop: 8 }} onClick={() => setEditingCourt({ venueId: v.id, court: 'new' })}>
-                    <Plus size={13} /> Add court
-                  </button>
+                  {isAdmin && (
+                    <button style={{ ...styles.ghostBtn, marginTop: 8 }} onClick={() => setEditingCourt({ venueId: v.id, court: 'new' })}>
+                      <Plus size={13} /> Add court
+                    </button>
+                  )}
                 </div>
               )}
             </Card>
@@ -1173,7 +1253,7 @@ function Field({ label, children }) {
 ========================================================================= */
 
 function PricingTab({ ctx }) {
-  const { master, setMaster } = ctx;
+  const { master, setMaster, isAdmin } = ctx;
   const [venueId, setVenueId] = useState(master.venues[0]?.id || '');
   const [editingGroup, setEditingGroup] = useState(null); // null | 'new' | groupObject
   const [showQuickSetup, setShowQuickSetup] = useState(false);
@@ -1257,8 +1337,8 @@ function PricingTab({ ctx }) {
     <TabWrap title="Pricing" eyebrow="Set once per venue · historically preserved">
       <div style={styles.filterRow}>
         <Select value={venueId} onChange={setVenueId} options={master.venues.map(v => ({ value: v.id, label: v.name }))} />
-        {venueCourts.length > 0 && <button style={styles.primaryBtn} onClick={() => setShowQuickSetup(true)}><DollarSign size={13} /> Quick setup: peak / off-peak</button>}
-        {venueCourts.length > 0 && <button style={styles.ghostBtn} onClick={() => setEditingGroup('new')}><Plus size={14} /> Add custom rule</button>}
+        {isAdmin && venueCourts.length > 0 && <button style={styles.primaryBtn} onClick={() => setShowQuickSetup(true)}><DollarSign size={13} /> Quick setup: peak / off-peak</button>}
+        {isAdmin && venueCourts.length > 0 && <button style={styles.ghostBtn} onClick={() => setEditingGroup('new')}><Plus size={14} /> Add custom rule</button>}
       </div>
 
       {venueCourts.length === 0 ? <div style={styles.mutedNote}>Add a court to this venue first (Venues &amp; Courts tab).</div> : (
@@ -1283,8 +1363,8 @@ function PricingTab({ ctx }) {
                     <td style={styles.td}>{allCourts ? <Badge tone="weekday">All {venueCourts.length} courts</Badge> : g.courtIds.map(courtNameOf).join(', ')}</td>
                     <td style={{ ...styles.td, fontFamily: 'var(--font-mono)', fontSize: 12 }}>{r.effectiveFrom || '—'} → {r.effectiveUntil || 'ongoing'}</td>
                     <td style={styles.td}>
-                      <button style={styles.iconBtnSm} onClick={() => setEditingGroup(g)}><Edit2 size={12} /></button>
-                      <button style={styles.iconBtnSm} onClick={() => deleteGroup(g.key)}><Trash2 size={12} /></button>
+                      {isAdmin && <button style={styles.iconBtnSm} onClick={() => setEditingGroup(g)}><Edit2 size={12} /></button>}
+                      {isAdmin && <button style={styles.iconBtnSm} onClick={() => deleteGroup(g.key)}><Trash2 size={12} /></button>}
                     </td>
                   </tr>
                 );
@@ -1550,7 +1630,7 @@ function OccupancyTab({ ctx }) {
 }
 
 function DayEntry({ ctx, venue, court, date, setDate }) {
-  const { master, occData, persistOccMonth } = ctx;
+  const { master, occData, persistOccMonth, isAdmin } = ctx;
   const courtId = court.id;
   const monthKey = monthKeyOf(date);
   const hours = (occData[monthKey]?.[courtId]?.[date]) || defaultHourStates(...Object.values(courtHours(court, venue)));
@@ -1574,6 +1654,7 @@ function DayEntry({ ctx, venue, court, date, setDate }) {
   }, [courtId, date, master.pricing, occData[monthKey]]); // eslint-disable-line
 
   function cycleState(h) {
+    if (!isAdmin) return;
     const next = hours.map((x, i) => {
       if (i !== h) return x;
       const order = ['closed', 'available', 'occupied', 'event'];
@@ -1595,6 +1676,7 @@ function DayEntry({ ctx, venue, court, date, setDate }) {
   }
 
   function resetDay() {
+    if (!isAdmin) return;
     if (!confirm('Reset this day to default open/closed hours? Any bookings logged for it will be lost.')) return;
     const fresh = defaultHourStates(...Object.values(courtHours(court, venue)));
     const monthData = { ...(occData[monthKey] || {}) };
@@ -1612,7 +1694,8 @@ function DayEntry({ ctx, venue, court, date, setDate }) {
     <>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
         <input type="date" style={styles.input} value={date} onChange={e => setDate(e.target.value)} />
-        <button style={styles.ghostBtn} onClick={resetDay}><RefreshCw size={13} /> Reset day</button>
+        {isAdmin && <button style={styles.ghostBtn} onClick={resetDay}><RefreshCw size={13} /> Reset day</button>}
+        {!isAdmin && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>View-only — log in as admin to edit.</div>}
       </div>
 
       <div style={styles.legendRow}>
@@ -1626,11 +1709,13 @@ function DayEntry({ ctx, venue, court, date, setDate }) {
         {hours.map((h, i) => {
           const bg = h.state === 'closed' ? 'var(--bg)' : h.state === 'occupied' ? 'var(--court)' : h.state === 'event' ? 'var(--ball)' : '#BFE0CC';
           return (
-            <button key={i} onClick={() => cycleState(i)} style={{
+            <button key={i} onClick={() => cycleState(i)} disabled={!isAdmin} style={{
               ...styles.hourCell,
               background: bg,
               borderColor: h.state === 'closed' ? 'var(--border)' : 'transparent',
               color: h.state === 'occupied' ? '#fff' : 'var(--ink)',
+              cursor: isAdmin ? 'pointer' : 'default',
+              opacity: isAdmin ? 1 : 0.85,
             }}>
               <span style={{ fontSize: 11, fontWeight: 700 }}>{hourLabel(i)}</span>
               {h.state === 'occupied' && h.price != null && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', opacity: 0.9 }}>{fmtMoney(h.price)}</span>}
@@ -2189,22 +2274,114 @@ function MarketShareCard({ rows, aggregate }) {
 }
 
 /* =========================================================================
+   DATA LOG TAB — track when bookings were last checked/confirmed
+========================================================================= */
+
+function DataLogTab({ ctx }) {
+  const { master, setMaster, isAdmin } = ctx;
+  const logs = master.checkLogs || [];
+
+  const [checkedAt, setCheckedAt] = useState(() => {
+    const now = new Date();
+    now.setSeconds(0, 0);
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    return now.toISOString().slice(0, 16);
+  });
+  const [coveredFrom, setCoveredFrom] = useState(todayStr());
+  const [coveredTo, setCoveredTo] = useState(todayStr());
+  const [notes, setNotes] = useState('');
+
+  function addLog() {
+    if (!isAdmin || !coveredFrom || !coveredTo) return;
+    const entry = {
+      id: uid('log'),
+      checkedAt: new Date(checkedAt).toISOString(),
+      coveredFrom, coveredTo,
+      notes: notes.trim(),
+    };
+    setMaster({ ...master, checkLogs: [entry, ...logs] });
+    setNotes('');
+    setCoveredFrom(todayStr());
+    setCoveredTo(todayStr());
+  }
+  function deleteLog(id) {
+    if (!isAdmin) return;
+    setMaster({ ...master, checkLogs: logs.filter(l => l.id !== id) });
+  }
+
+  const sorted = [...logs].sort((a, b) => new Date(b.checkedAt) - new Date(a.checkedAt));
+  const latestCoveredTo = logs.length ? logs.reduce((max, l) => l.coveredTo > max ? l.coveredTo : max, logs[0].coveredTo) : null;
+  const mostRecentCheck = sorted[0] || null;
+
+  return (
+    <TabWrap title="Data Log" eyebrow="Track when bookings were last checked & confirmed">
+      <div style={styles.statGrid}>
+        <StatBlock label="Confirmed through" value={latestCoveredTo ? fmtShortDate(latestCoveredTo) : '—'} accent="var(--court)" sub={latestCoveredTo ? `${latestCoveredTo}` : 'No check-ins logged yet'} />
+        <StatBlock label="Last check-in" value={mostRecentCheck ? timeAgo(mostRecentCheck.checkedAt) : '—'} sub={mostRecentCheck ? new Date(mostRecentCheck.checkedAt).toLocaleString() : ''} />
+        <StatBlock label="Total check-ins logged" value={logs.length} />
+      </div>
+
+      {isAdmin && (
+        <Card title="Log a check-in" eyebrow="Record what you just verified">
+          <div style={styles.formRow}>
+            <Field label="Checked at"><input type="datetime-local" style={styles.input} value={checkedAt} onChange={e => setCheckedAt(e.target.value)} /></Field>
+          </div>
+          <div style={styles.formRow}>
+            <Field label="Covered from"><input type="date" style={styles.input} value={coveredFrom} onChange={e => setCoveredFrom(e.target.value)} /></Field>
+            <Field label="Covered to"><input type="date" style={styles.input} value={coveredTo} onChange={e => setCoveredTo(e.target.value)} /></Field>
+          </div>
+          <Field label="Notes (optional)"><input style={styles.input} value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. Checked all 3 venues, caught up on walk-ins" /></Field>
+          <button style={styles.primaryBtn} onClick={addLog}><Plus size={14} /> Add check-in</button>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
+            "Covered from / to" is the date range of <b>bookings</b> you actually went through — not necessarily today. If you check every day but only catch up on one day's bookings each time, log a single-day range each time.
+          </div>
+        </Card>
+      )}
+
+      <Card title="Check-in history" style={{ marginTop: isAdmin ? 16 : 0 }}>
+        {sorted.length === 0 ? <div style={styles.mutedNote}>No check-ins logged yet{isAdmin ? ' — add your first one above.' : '.'}</div> : (
+          <table style={styles.table}>
+            <thead><tr>
+              <th style={styles.th}>Checked at</th><th style={styles.th}>Covered dates</th>
+              <th style={styles.th}>Notes</th><th style={styles.th}></th>
+            </tr></thead>
+            <tbody>
+              {sorted.map(l => (
+                <tr key={l.id}>
+                  <td style={{ ...styles.td, fontFamily: 'var(--font-mono)', fontSize: 12 }}>{new Date(l.checkedAt).toLocaleString()}</td>
+                  <td style={{ ...styles.td, fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                    {l.coveredFrom === l.coveredTo ? fmtShortDate(l.coveredFrom) : `${fmtShortDate(l.coveredFrom)} – ${fmtShortDate(l.coveredTo)}`}
+                  </td>
+                  <td style={styles.td}>{l.notes || '—'}</td>
+                  <td style={styles.td}>{isAdmin && <button style={styles.iconBtnSm} onClick={() => deleteLog(l.id)}><Trash2 size={12} /></button>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </TabWrap>
+  );
+}
+
+/* =========================================================================
    CALENDAR TAB
 ========================================================================= */
 
 function CalendarTab({ ctx }) {
-  const { master, setMaster } = ctx;
+  const { master, setMaster, isAdmin } = ctx;
   const [date, setDate] = useState(todayStr());
   const [type, setType] = useState('poya');
   const [name, setName] = useState('');
 
   function addSpecialDay() {
-    if (!date) return;
+    if (!isAdmin || !date) return;
     const specialDays = { ...master.specialDays, [date]: { type, name: name.trim() } };
     setMaster({ ...master, specialDays });
     setName('');
   }
   function removeSpecialDay(d) {
+    if (!isAdmin) return;
     const specialDays = { ...master.specialDays };
     delete specialDays[d];
     setMaster({ ...master, specialDays });
@@ -2214,19 +2391,21 @@ function CalendarTab({ ctx }) {
 
   return (
     <TabWrap title="Calendar" eyebrow="Poya days, public holidays & special events">
-      <Card title="Add a special day">
-        <div style={styles.formRow}>
-          <Field label="Date"><input type="date" style={styles.input} value={date} onChange={e => setDate(e.target.value)} /></Field>
-          <Field label="Type"><Select value={type} onChange={setType} options={SPECIAL_DAY_TYPES} /></Field>
-        </div>
-        <Field label="Name (optional)"><input style={styles.input} value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Vesak Poya" /></Field>
-        <button style={styles.primaryBtn} onClick={addSpecialDay}><Plus size={14} /> Add to calendar</button>
-        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
-          Weekday / weekend is detected automatically from the date. Mark Poya days and public holidays here so occupancy on those dates can be compared against normal days.
-        </div>
-      </Card>
+      {isAdmin && (
+        <Card title="Add a special day">
+          <div style={styles.formRow}>
+            <Field label="Date"><input type="date" style={styles.input} value={date} onChange={e => setDate(e.target.value)} /></Field>
+            <Field label="Type"><Select value={type} onChange={setType} options={SPECIAL_DAY_TYPES} /></Field>
+          </div>
+          <Field label="Name (optional)"><input style={styles.input} value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Vesak Poya" /></Field>
+          <button style={styles.primaryBtn} onClick={addSpecialDay}><Plus size={14} /> Add to calendar</button>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
+            Weekday / weekend is detected automatically from the date. Mark Poya days and public holidays here so occupancy on those dates can be compared against normal days.
+          </div>
+        </Card>
+      )}
 
-      <Card title="Marked days" style={{ marginTop: 16 }}>
+      <Card title="Marked days" style={{ marginTop: isAdmin ? 16 : 0 }}>
         {entries.length === 0 ? <div style={styles.mutedNote}>No special days marked yet.</div> : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {entries.map(([d, info]) => (
@@ -2235,7 +2414,7 @@ function CalendarTab({ ctx }) {
                 <div style={{ fontSize: 12, color: 'var(--muted)', width: 90 }}>{DAY_NAMES[dateToDow(d)]}</div>
                 <Badge tone={info.type}>{SPECIAL_DAY_TYPES.find(t => t.value === info.type)?.label}</Badge>
                 <div style={{ flex: 1, fontSize: 13 }}>{info.name}</div>
-                <button style={styles.iconBtnSm} onClick={() => removeSpecialDay(d)}><Trash2 size={12} /></button>
+                {isAdmin && <button style={styles.iconBtnSm} onClick={() => removeSpecialDay(d)}><Trash2 size={12} /></button>}
               </div>
             ))}
           </div>
