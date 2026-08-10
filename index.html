@@ -217,13 +217,17 @@ function fmtPct(n) {
 function safeDiv(a, b) { return b > 0 ? a / b : 0; }
 
 function defaultHourStates(openTime, closeTime) {
-  // Every hour starts "available" by default — simplest for data entry.
-  // openTime/closeTime are still used elsewhere (Week view's row range,
-  // venue display) but no longer pre-close hours here; mark a specific
-  // hour "closed" manually if a court genuinely never opens then.
+  // Pre-fill hours within the venue/court's opening hours as "available"
+  // and everything outside as "closed" — so you only need to touch the
+  // hours that were actually booked. Handles a midnight close time
+  // ("00:00") correctly as end-of-day rather than hour 0.
+  const openMin = timeToMin(openTime || '06:00');
+  let closeMin = timeToMin(closeTime || '22:00');
+  if (closeMin <= openMin) closeMin += 24 * 60;
   const arr = [];
   for (let h = 0; h < 24; h++) {
-    arr.push({ state: 'available', price: null, category: null });
+    const withinOpen = h * 60 >= openMin && h * 60 < closeMin;
+    arr.push({ state: withinOpen ? 'available' : 'closed', price: null, category: null });
   }
   return arr;
 }
@@ -476,13 +480,15 @@ function App() {
   }, [occData, master]);
 
   function aggregate(rows) {
-    const availableHours = rows.length;
-    const occupiedHours = rows.filter(r => r.occupied).length;
-    const revenue = rows.filter(r => r.occupied).reduce((s, r) => s + (r.price || 0), 0);
+    const eventHours = rows.filter(r => r.state === 'event').length;
+    const countable = rows.filter(r => r.state !== 'event');
+    const availableHours = countable.length;
+    const occupiedHours = countable.filter(r => r.occupied).length;
+    const revenue = countable.filter(r => r.occupied).reduce((s, r) => s + (r.price || 0), 0);
     const occupancyPct = safeDiv(occupiedHours, availableHours) * 100;
     const revpah = safeDiv(revenue, availableHours);
     const avgRate = safeDiv(revenue, occupiedHours);
-    return { availableHours, occupiedHours, revenue, occupancyPct, revpah, avgRate };
+    return { availableHours, occupiedHours, revenue, occupancyPct, revpah, avgRate, eventHours };
   }
 
   const ctx = {
@@ -840,6 +846,7 @@ function GeographyTab({ ctx }) {
         <StatBlock label="Occupancy" value={fmtPct(agg.occupancyPct)} accent="var(--court)" />
         <StatBlock label="Est. revenue" value={fmtMoney(agg.revenue)} accent="var(--ball-dark)" />
         <StatBlock label="RevPAH" value={fmtMoney(agg.revpah)} sub="revenue / available hr" />
+        <StatBlock label="Event hrs" value={agg.eventHours.toLocaleString()} sub="booked for events, excluded above" />
       </div>
 
       <Card title={`Breakdown by ${level === 'national' ? 'province' : level === 'province' ? 'district' : level === 'district' ? 'city' : 'venue'}`}>
@@ -1525,7 +1532,7 @@ function DayEntry({ ctx, venue, court, date, setDate }) {
   function cycleState(h) {
     const next = hours.map((x, i) => {
       if (i !== h) return x;
-      const order = ['closed', 'available', 'occupied'];
+      const order = ['closed', 'available', 'occupied', 'event'];
       const idx = order.indexOf(x.state);
       const nextState = order[(idx + 1) % order.length];
       let price = x.price, category = x.category;
@@ -1533,6 +1540,8 @@ function DayEntry({ ctx, venue, court, date, setDate }) {
         const rule = matchPricingRule(master.pricing, courtId, date, h);
         price = rule ? rule.price : x.price;
         category = rule ? rule.category : x.category;
+      } else if (nextState === 'event') {
+        price = null; category = null; // events never count toward revenue
       }
       return { state: nextState, price, category };
     });
@@ -1549,8 +1558,9 @@ function DayEntry({ ctx, venue, court, date, setDate }) {
     persistOccMonth(monthKey, monthData);
   }
 
-  const avail = hours.filter(h => h.state !== 'closed').length;
+  const avail = hours.filter(h => h.state === 'available' || h.state === 'occupied').length;
   const occ = hours.filter(h => h.state === 'occupied').length;
+  const evt = hours.filter(h => h.state === 'event').length;
   const rev = hours.filter(h => h.state === 'occupied').reduce((s, h) => s + (h.price || 0), 0);
   const pct = safeDiv(occ, avail) * 100;
 
@@ -1565,26 +1575,32 @@ function DayEntry({ ctx, venue, court, date, setDate }) {
         <LegendDot color="var(--border)" label="Closed (tap to open)" />
         <LegendDot color="#BFE0CC" label="Available" />
         <LegendDot color="var(--court)" label="Occupied" />
+        <LegendDot color="var(--ball)" label="Booked for event" />
       </div>
 
       <div style={styles.hourGrid}>
-        {hours.map((h, i) => (
-          <button key={i} onClick={() => cycleState(i)} style={{
-            ...styles.hourCell,
-            background: h.state === 'closed' ? 'var(--bg)' : h.state === 'occupied' ? 'var(--court)' : '#BFE0CC',
-            borderColor: h.state === 'closed' ? 'var(--border)' : 'transparent',
-            color: h.state === 'occupied' ? '#fff' : 'var(--ink)',
-          }}>
-            <span style={{ fontSize: 11, fontWeight: 700 }}>{hourLabel(i)}</span>
-            {h.state === 'occupied' && h.price != null && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', opacity: 0.9 }}>{fmtMoney(h.price)}</span>}
-            {h.state !== 'closed' && h.category && <span style={{ fontSize: 8, opacity: 0.75, textTransform: 'uppercase' }}>{h.category.replace('_', ' ')}</span>}
-          </button>
-        ))}
+        {hours.map((h, i) => {
+          const bg = h.state === 'closed' ? 'var(--bg)' : h.state === 'occupied' ? 'var(--court)' : h.state === 'event' ? 'var(--ball)' : '#BFE0CC';
+          return (
+            <button key={i} onClick={() => cycleState(i)} style={{
+              ...styles.hourCell,
+              background: bg,
+              borderColor: h.state === 'closed' ? 'var(--border)' : 'transparent',
+              color: h.state === 'occupied' ? '#fff' : 'var(--ink)',
+            }}>
+              <span style={{ fontSize: 11, fontWeight: 700 }}>{hourLabel(i)}</span>
+              {h.state === 'occupied' && h.price != null && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', opacity: 0.9 }}>{fmtMoney(h.price)}</span>}
+              {h.state === 'event' && <span style={{ fontSize: 8, opacity: 0.8, fontWeight: 700, textTransform: 'uppercase' }}>Event</span>}
+              {h.state === 'occupied' && h.category && <span style={{ fontSize: 8, opacity: 0.75, textTransform: 'uppercase' }}>{h.category.replace('_', ' ')}</span>}
+            </button>
+          );
+        })}
       </div>
 
       <div style={styles.statGrid}>
         <StatBlock label="Available hrs" value={avail} />
         <StatBlock label="Occupied hrs" value={occ} />
+        <StatBlock label="Event hrs" value={evt} accent="var(--ball-dark)" />
         <StatBlock label="Occupancy" value={fmtPct(pct)} accent="var(--court)" />
         <StatBlock label="Est. revenue" value={fmtMoney(rev)} accent="var(--ball-dark)" />
       </div>
@@ -1638,10 +1654,11 @@ function WeekEntry({ ctx, venue, court, anchor, setAnchor }) {
 
   // week-level stats — always derived live from the same records the Day
   // view edits, so this updates automatically as bookings change.
-  let avail = 0, occ = 0, rev = 0;
+  let avail = 0, occ = 0, rev = 0, evt = 0;
   days.forEach(d => {
     hoursFor(d).forEach((h, i) => {
       if (i < openHour || i >= closeHourExclusive) return;
+      if (h.state === 'event') { evt++; return; }
       avail++;
       if (h.state === 'occupied') { occ++; rev += (h.price || 0); }
     });
@@ -1661,6 +1678,7 @@ function WeekEntry({ ctx, venue, court, anchor, setAnchor }) {
         <div style={styles.legendRow}>
           <LegendDot color="#BFE0CC" label="Available" />
           <LegendDot color="var(--court)" label="Occupied" />
+          <LegendDot color="var(--ball)" label="Event" />
         </div>
         <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>
           Read-only summary — click into a day on the <b>Day</b> tab above to log or change bookings.
@@ -1683,12 +1701,13 @@ function WeekEntry({ ctx, venue, court, anchor, setAnchor }) {
                 {days.map(d => {
                   const cell = hoursFor(d)[h];
                   const isOccupied = cell.state === 'occupied';
+                  const isEvent = cell.state === 'event';
                   return (
                     <div key={d + h}
-                      title={`${DAY_NAMES[dateToDow(d)]} ${fmtShortDate(d)}, ${hourLabel(h)}${isOccupied && cell.price != null ? ' — ' + fmtMoney(cell.price) : ''}`}
+                      title={`${DAY_NAMES[dateToDow(d)]} ${fmtShortDate(d)}, ${hourLabel(h)}${isOccupied && cell.price != null ? ' — ' + fmtMoney(cell.price) : ''}${isEvent ? ' — event' : ''}`}
                       style={{
                         ...styles.weekCell, cursor: 'default',
-                        background: isOccupied ? 'var(--court)' : '#BFE0CC',
+                        background: isOccupied ? 'var(--court)' : isEvent ? 'var(--ball)' : '#BFE0CC',
                         color: isOccupied ? '#fff' : 'var(--ink)',
                       }}>
                       {isOccupied && cell.price != null ? <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)' }}>{Math.round(cell.price / 100) / 10}k</span> : null}
@@ -1704,6 +1723,7 @@ function WeekEntry({ ctx, venue, court, anchor, setAnchor }) {
       <div style={styles.statGrid}>
         <StatBlock label="Available hrs (week)" value={avail} />
         <StatBlock label="Occupied hrs (week)" value={occ} />
+        <StatBlock label="Event hrs (week)" value={evt} accent="var(--ball-dark)" />
         <StatBlock label="Week occupancy" value={fmtPct(pct)} accent="var(--court)" />
         <StatBlock label="Week est. revenue" value={fmtMoney(rev)} accent="var(--ball-dark)" />
       </div>
