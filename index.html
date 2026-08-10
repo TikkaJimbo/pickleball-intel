@@ -190,6 +190,37 @@ function fmtShortDate(dateStr) {
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return `${d} ${months[m - 1]}`;
 }
+const MONTH_NAMES_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function monthLabel(yyyyMm) {
+  const [y, m] = yyyyMm.split('-').map(Number);
+  return `${MONTH_NAMES_FULL[m - 1]} ${y}`;
+}
+function monthOptions(pastCount = 8, futureCount = 11) {
+  const today = todayStr();
+  const [y0, m0] = today.split('-').map(Number);
+  const opts = [];
+  for (let offset = -pastCount; offset <= futureCount; offset++) {
+    const total = (m0 - 1) + offset;
+    const y = y0 + Math.floor(total / 12);
+    const m = ((total % 12) + 12) % 12 + 1;
+    const value = `${y}-${pad2(m)}`;
+    opts.push({ value, label: monthLabel(value) });
+  }
+  return opts;
+}
+function daysInMonth(yyyyMm) {
+  const [y, m] = yyyyMm.split('-').map(Number);
+  return new Date(y, m, 0).getDate();
+}
+function weekRangesForMonth(yyyyMm) {
+  const total = daysInMonth(yyyyMm);
+  const ranges = [];
+  for (let start = 1; start <= total; start += 7) {
+    const end = Math.min(start + 6, total);
+    ranges.push({ label: `Week ${ranges.length + 1}`, startDay: start, endDay: end });
+  }
+  return ranges;
+}
 function complementRanges(startTime, endTime) {
   // given an off-peak window, return the rest-of-day range(s) so a
   // generated "peak" rule never overlaps it
@@ -1827,11 +1858,21 @@ function HeatmapTab({ ctx }) {
 
 function RankingsTab({ ctx }) {
   const { master, flatRows, aggregate } = ctx;
-  const [days, setDays] = useState(30);
+  const [monthKey, setMonthKey] = useState(todayStr().slice(0, 7));
+  const [week, setWeek] = useState(''); // '' = whole month, else index into weekRangesForMonth
   const [metric, setMetric] = useState('occupancyPct');
 
-  const since = addDaysStr(todayStr(), -days);
-  const rows = flatRows.filter(r => r.date >= since);
+  const weeks = weekRangesForMonth(monthKey);
+  useEffect(() => { setWeek(''); }, [monthKey]); // reset week choice when month changes
+
+  let rows = flatRows.filter(r => monthKeyOf(r.date) === monthKey);
+  if (week !== '') {
+    const w = weeks[Number(week)];
+    rows = rows.filter(r => {
+      const day = parseInt(r.date.split('-')[2], 10);
+      return day >= w.startDay && day <= w.endDay;
+    });
+  }
 
   const byVenue = groupAndAggregate(rows, r => r.venueName, aggregate)
     .filter(r => r.availableHours > 0).sort((a, b) => b[metric] - a[metric]);
@@ -1849,13 +1890,14 @@ function RankingsTab({ ctx }) {
   const fmt = (v, key) => key === 'occupancyPct' ? fmtPct(v) : key === 'revenue' || key === 'revpah' ? fmtMoney(v) : v.toLocaleString();
 
   return (
-    <TabWrap title="Rankings" eyebrow="Venues, cities & businesses">
+    <TabWrap title="Rankings" eyebrow="Venues, cities & businesses — by the booking's own date, not when it was entered">
       <div style={styles.filterRow}>
-        <Select value={String(days)} onChange={v => setDays(Number(v))} options={[{ value: '7', label: 'Last 7 days' }, { value: '30', label: 'Last 30 days' }, { value: '90', label: 'Last 90 days' }]} />
+        <Select value={monthKey} onChange={setMonthKey} options={monthOptions()} />
+        <Select value={week} onChange={setWeek} placeholder="Whole month" options={weeks.map((w, i) => ({ value: String(i), label: `${w.label} (${w.startDay}–${w.endDay})` }))} />
         <Select value={metric} onChange={setMetric} options={metricOptions} />
       </div>
 
-      {rows.length === 0 ? <div style={styles.mutedNote}>No occupancy data logged for this range yet.</div> : (
+      {rows.length === 0 ? <div style={styles.mutedNote}>No occupancy data logged for {monthLabel(monthKey)}{week !== '' ? `, ${weeks[Number(week)].label}` : ''} yet.</div> : (
         <div style={styles.threeCol}>
           <Card eyebrow="Business leaderboard" title="Top businesses">
             <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>Locations sharing a business name in Venues & Courts are combined here.</div>
