@@ -535,6 +535,37 @@ function App() {
     setSaving(false);
   }
 
+  // Deletes logged occupancy on/after cutoffDate. If courtIdFilter is null,
+  // every court is affected; otherwise only courts in that list are touched.
+  // Returns the number of court-day records removed.
+  async function deleteDataFrom(cutoffDate, courtIdFilter) {
+    setSaving(true);
+    let deletedCount = 0;
+    const monthUpdates = [];
+    Object.entries(occData).forEach(([monthKey, byCourt]) => {
+      let changed = false;
+      const newByCourt = { ...byCourt };
+      Object.entries(byCourt).forEach(([courtId, byDate]) => {
+        if (courtIdFilter && !courtIdFilter.includes(courtId)) return;
+        const newByDate = {};
+        Object.entries(byDate).forEach(([date, hours]) => {
+          if (date >= cutoffDate) { changed = true; deletedCount++; return; }
+          newByDate[date] = hours;
+        });
+        newByCourt[courtId] = newByDate;
+      });
+      if (changed) monthUpdates.push([monthKey, newByCourt]);
+    });
+    const nextOccData = { ...occData };
+    for (const [monthKey, monthData] of monthUpdates) {
+      nextOccData[monthKey] = monthData;
+      await storageSet('pbi_occ_' + monthKey, monthData, true);
+    }
+    setOccData(nextOccData);
+    setSaving(false);
+    return deletedCount;
+  }
+
   // ---- flatten occupancy into analytics-friendly rows ----
   const flatRows = useMemo(() => {
     const rows = [];
@@ -595,7 +626,7 @@ function App() {
 
   const ctx = {
     master, setMaster: persistMaster, occData, setOccData, persistOccMonth,
-    flatRows, aggregate, saving, loadSample, clearAll, clearBookingsOnly,
+    flatRows, aggregate, saving, loadSample, clearAll, clearBookingsOnly, deleteDataFrom,
     isAdmin,
   };
 
@@ -2446,12 +2477,10 @@ function MarketShareCard({ rows, aggregate, master, scopeVenues }) {
   ];
   const keyForVenue = (v) => groupBy === 'venueName' ? v.name : groupBy === 'business' ? (v.business || v.name) : v.city;
 
-  // Booking / revenue: grouped from actual logged rows, then converted to a
-  // per-logged-day AVERAGE — not a raw total. Otherwise a venue you've
-  // logged for 60 days would out-rank one you've logged for 5 days purely
-  // from having more data, regardless of which one actually performs
-  // better on a typical day. This puts booking/revenue share on the same
-  // "typical day" basis as supply share, which is already fixed.
+  const total = aggregate(rows);
+
+  // Booking / revenue: grouped from actual logged rows — raw totals for
+  // the period in scope.
   const bookingBuckets = {};
   rows.forEach(r => {
     const k = r[groupBy];
@@ -2472,25 +2501,16 @@ function MarketShareCard({ rows, aggregate, master, scopeVenues }) {
   const totalSupplyHours = scopeVenues.reduce((s, v) => s + dailySupplyHours(v, master), 0);
 
   const allKeys = new Set([...Object.keys(bookingBuckets), ...Object.keys(supplyBuckets)]);
-  const withDailyAvgs = [...allKeys].map(key => {
+  const groups = [...allKeys].map(key => {
     const rs = bookingBuckets[key] || [];
     const g = aggregate(rs);
     const loggedDays = new Set(rs.map(r => r.date)).size;
-    const avgDailyOccupied = loggedDays > 0 ? g.occupiedHours / loggedDays : 0;
-    const avgDailyRevenue = loggedDays > 0 ? g.revenue / loggedDays : 0;
     const supplyHours = supplyBuckets[key] || 0;
-    return { key, ...g, supplyHours, loggedDays, avgDailyOccupied, avgDailyRevenue };
-  });
-
-  const totalAvgDailyOccupied = withDailyAvgs.reduce((s, g) => s + g.avgDailyOccupied, 0);
-  const totalAvgDailyRevenue = withDailyAvgs.reduce((s, g) => s + g.avgDailyRevenue, 0);
-
-  const groups = withDailyAvgs.map(g => {
-    const bookingShare = safeDiv(g.avgDailyOccupied, totalAvgDailyOccupied) * 100;
-    const supplyShare = safeDiv(g.supplyHours, totalSupplyHours) * 100;
-    const revenueShare = safeDiv(g.avgDailyRevenue, totalAvgDailyRevenue) * 100;
+    const bookingShare = safeDiv(g.occupiedHours, total.occupiedHours) * 100;
+    const supplyShare = safeDiv(supplyHours, totalSupplyHours) * 100;
+    const revenueShare = safeDiv(g.revenue, total.revenue) * 100;
     return {
-      ...g, bookingShare, supplyShare, revenueShare,
+      key, ...g, supplyHours, loggedDays, bookingShare, supplyShare, revenueShare,
       performanceIndex: supplyShare > 0 ? bookingShare / supplyShare : null,
     };
   })
@@ -2528,7 +2548,7 @@ function MarketShareCard({ rows, aggregate, master, scopeVenues }) {
         </table>
       )}
       <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
-        Supply share = (opening hours/day × court count) ÷ total court-hours/day across the market in scope — a fixed capacity figure. Booking share and revenue share are each one's <b>average per logged day</b> as a share of the market's combined daily average — not a raw total — so a venue logged for 5 days is compared fairly against one logged for 60. Performance index = booking share ÷ supply share. Above 1.0× means it earns more bookings on a typical day than its real capacity would predict; below 1.0× means it underperforms that capacity. "Logged days" shows how much data backs each row — treat rows with very few days cautiously.
+        Supply share = (opening hours/day × court count) ÷ total court-hours/day across the market in scope — a fixed capacity figure. Booking share and revenue share are each one's share of total booked hours / total revenue actually logged in this period. Performance index = booking share ÷ supply share. Above 1.0× means it earns more bookings than its real operating capacity would predict; below 1.0× means it underperforms that capacity. "Logged days" shows how much data backs each row — a strong or weak index built on very few days is less reliable than one built on many.
       </div>
     </Card>
   );
@@ -2537,6 +2557,66 @@ function MarketShareCard({ rows, aggregate, master, scopeVenues }) {
 /* =========================================================================
    DATA LOG TAB — track when bookings were last checked/confirmed
 ========================================================================= */
+
+function DeleteDataCard({ ctx }) {
+  const { master, deleteDataFrom } = ctx;
+  const [scopeType, setScopeType] = useState('all'); // 'all' | 'business' | 'venue'
+  const [scopeValue, setScopeValue] = useState('');
+  const [cutoffDate, setCutoffDate] = useState(todayStr());
+  const [result, setResult] = useState(null);
+
+  const businesses = [...new Set(master.venues.map(v => v.business || v.name))].sort();
+  const venueOptions = master.venues.map(v => ({ value: v.id, label: v.name }));
+
+  function courtIdsForScope() {
+    if (scopeType === 'all') return null;
+    if (scopeType === 'business') {
+      const venueIds = master.venues.filter(v => (v.business || v.name) === scopeValue).map(v => v.id);
+      return master.courts.filter(c => venueIds.includes(c.venueId)).map(c => c.id);
+    }
+    if (scopeType === 'venue') {
+      return master.courts.filter(c => c.venueId === scopeValue).map(c => c.id);
+    }
+    return null;
+  }
+
+  async function handleDelete() {
+    if (scopeType !== 'all' && !scopeValue) return;
+    const scopeLabel = scopeType === 'all' ? 'ALL venues' : scopeType === 'business' ? `"${scopeValue}"` : venueOptions.find(v => v.value === scopeValue)?.label;
+    if (!confirm(`Delete every logged booking on or after ${cutoffDate} for ${scopeLabel}?\n\nThis cannot be undone.`)) return;
+    const count = await deleteDataFrom(cutoffDate, courtIdsForScope());
+    setResult(count);
+  }
+
+  return (
+    <Card title="Delete logged data" eyebrow="Clean up future or mistaken entries" style={{ marginBottom: 16 }}>
+      <div style={styles.formRow} className="form-row">
+        <Field label="Scope">
+          <Select value={scopeType} onChange={v => { setScopeType(v); setScopeValue(''); setResult(null); }}
+            options={[{ value: 'all', label: 'All venues' }, { value: 'business', label: 'One business' }, { value: 'venue', label: 'One venue' }]} />
+        </Field>
+        {scopeType === 'business' && (
+          <Field label="Business"><Select value={scopeValue} onChange={v => { setScopeValue(v); setResult(null); }} placeholder="Choose a business" options={businesses} /></Field>
+        )}
+        {scopeType === 'venue' && (
+          <Field label="Venue"><Select value={scopeValue} onChange={v => { setScopeValue(v); setResult(null); }} placeholder="Choose a venue" options={venueOptions} /></Field>
+        )}
+      </div>
+      <Field label="Delete all logged bookings on or after"><input type="date" style={styles.input} value={cutoffDate} onChange={e => { setCutoffDate(e.target.value); setResult(null); }} /></Field>
+      <button style={{ ...styles.ghostBtn, borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={handleDelete} disabled={scopeType !== 'all' && !scopeValue}>
+        <Trash2 size={13} /> Delete logged data from this date onward
+      </button>
+      {result != null && (
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>
+          {result === 0 ? 'Nothing matched — no data was on or after that date for this scope.' : `Deleted ${result} logged court-day record${result === 1 ? '' : 's'}.`}
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
+        Use this to clear out future dates you entered ahead of time but haven't actually confirmed yet, or to undo a batch of mistaken entries for one venue or business. Venues, courts, and pricing are never touched — only the hour-by-hour booking records for dates on or after the one you pick.
+      </div>
+    </Card>
+  );
+}
 
 function DataLogTab({ ctx }) {
   const { master, setMaster, isAdmin } = ctx;
@@ -2581,6 +2661,8 @@ function DataLogTab({ ctx }) {
         <StatBlock label="Last check-in" value={mostRecentCheck ? timeAgo(mostRecentCheck.checkedAt) : '—'} sub={mostRecentCheck ? new Date(mostRecentCheck.checkedAt).toLocaleString() : ''} />
         <StatBlock label="Total check-ins logged" value={logs.length} />
       </div>
+
+      {isAdmin && <DeleteDataCard ctx={ctx} />}
 
       {isAdmin && (
         <Card title="Log a check-in" eyebrow="Record what you just verified">
