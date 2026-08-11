@@ -2299,13 +2299,81 @@ function BusinessTab({ ctx }) {
 
   const bizVenues = master.venues.filter(v => (v.business || v.name) === businessName);
   const bizCourts = master.courts.filter(c => bizVenues.some(v => v.id === c.venueId));
+  const bizCities = new Set(bizVenues.map(v => v.city));
   const agg = aggregate(bizRows);
+  const operating = operatingStats(bizRows, master);
+
+  // Booked hours per court per day — the review's suggested headline metric
+  const loggedDays = new Set(bizRows.map(r => r.date)).size || 1;
+  const courtCount = bizCourts.length || 1;
+  const bookedHrsPerCourtPerDay = agg.occupiedHours / courtCount / loggedDays;
+  const revenuePerCourt = agg.revenue / courtCount;
+
+  // Prime time
+  const primeRows = bizRows.filter(isPrimeRow);
+  const primeAgg = aggregate(primeRows);
+
+  // Market share / performance index — this business vs the whole tracked
+  // market, for the same period. Supply share is fixed daily capacity
+  // (independent of logging volume); booking/revenue share are raw totals
+  // for the selected period.
+  let periodRows = flatRows;
+  if (monthKey !== 'all') {
+    periodRows = periodRows.filter(r => monthKeyOf(r.date) === monthKey);
+    if (week !== '') {
+      const w = weeks[Number(week)];
+      periodRows = periodRows.filter(r => {
+        const day = parseInt(r.date.split('-')[2], 10);
+        return day >= w.startDay && day <= w.endDay;
+      });
+    }
+  }
+  const periodAgg = aggregate(periodRows);
+  const businessSupply = bizVenues.reduce((s, v) => s + dailySupplyHours(v, master), 0);
+  const totalSupply = master.venues.reduce((s, v) => s + dailySupplyHours(v, master), 0);
+  const supplyShare = safeDiv(businessSupply, totalSupply) * 100;
+  const bookingShare = safeDiv(agg.occupiedHours, periodAgg.occupiedHours) * 100;
+  const revenueShare = safeDiv(agg.revenue, periodAgg.revenue) * 100;
+  const performanceIndex = supplyShare > 0 ? bookingShare / supplyShare : null;
+  const revenuePerformanceIndex = supplyShare > 0 ? revenueShare / supplyShare : null;
 
   const byLocation = groupAndAggregate(bizRows, r => r.venueName, aggregate).sort((a, b) => b.occupancyPct - a.occupancyPct);
   const revenueTotal = byLocation.reduce((s, l) => s + l.revenue, 0);
   const topLocationShare = byLocation.length && revenueTotal > 0 ? safeDiv(Math.max(...byLocation.map(l => l.revenue)), revenueTotal) * 100 : 0;
   const occPcts = byLocation.filter(l => l.availableHours > 0).map(l => l.occupancyPct);
   const occRange = occPcts.length ? { min: Math.min(...occPcts), max: Math.max(...occPcts) } : null;
+  const highestRevenueLoc = byLocation.length ? [...byLocation].sort((a, b) => b.revenue - a.revenue)[0] : null;
+  const weakestLoc = byLocation.length ? byLocation[byLocation.length - 1] : null;
+
+  // Weekday vs weekend
+  const weekdayRows = bizRows.filter(r => !r.weekend);
+  const weekendRows = bizRows.filter(r => r.weekend);
+  const weekdayAgg = aggregate(weekdayRows);
+  const weekendAgg = aggregate(weekendRows);
+  const weekdayPrimeAgg = aggregate(weekdayRows.filter(isPrimeRow));
+  const weekendPrimeAgg = aggregate(weekendRows.filter(isPrimeRow));
+  const weekdayDaysCount = new Set(weekdayRows.map(r => r.date)).size || 1;
+  const weekendDaysCount = new Set(weekendRows.map(r => r.date)).size || 1;
+  const weekdayPerCourtDay = weekdayAgg.occupiedHours / courtCount / weekdayDaysCount;
+  const weekendPerCourtDay = weekendAgg.occupiedHours / courtCount / weekendDaysCount;
+  const weekendDemandIndex = weekdayPerCourtDay > 0 ? weekendPerCourtDay / weekdayPerCourtDay : null;
+
+  // Busiest periods
+  const byDow = Array.from({ length: 7 }, (_, dow) => ({ dow, ...aggregate(bizRows.filter(r => dateToDow(r.date) === dow)) }));
+  const busiestDow = byDow.filter(d => d.availableHours > 0).sort((a, b) => b.occupancyPct - a.occupancyPct)[0];
+  const byHourOfDay = Array.from({ length: 24 }, (_, h) => ({ h, ...aggregate(bizRows.filter(r => r.hour === h)) }));
+  const busiestHourOfDay = byHourOfDay.filter(h => h.availableHours > 0).sort((a, b) => b.occupancyPct - a.occupancyPct)[0];
+  let bestWindow = null;
+  for (let h = 0; h <= 21; h++) {
+    const wAgg = aggregate(bizRows.filter(r => r.hour >= h && r.hour < h + 3));
+    if (wAgg.availableHours > 0 && (!bestWindow || wAgg.occupancyPct > bestWindow.pct)) bestWindow = { start: h, end: h + 3, pct: wAgg.occupancyPct };
+  }
+
+  // Price position vs the market in the same cities this business operates in
+  const marketRowsInBizCities = periodRows.filter(r => bizCities.has(r.city));
+  const marketAggInCities = aggregate(marketRowsInBizCities);
+  const pricePremium = marketAggInCities.avgRate > 0 ? agg.avgRate / marketAggInCities.avgRate : null;
+  const occVsMarket = marketAggInCities.occupancyPct > 0 ? agg.occupancyPct / marketAggInCities.occupancyPct : null;
 
   // peak vs off-peak mix, classified live against current pricing rules
   const withCategory = bizRows.map(r => {
@@ -2314,6 +2382,9 @@ function BusinessTab({ ctx }) {
   });
   const catOrder = ['peak', 'off_peak', 'special', 'unclassified'];
   const byCategory = groupAndAggregate(withCategory, r => r.liveCategory, aggregate).sort((a, b) => catOrder.indexOf(a.key) - catOrder.indexOf(b.key));
+  const peakCat = byCategory.find(c => c.key === 'peak');
+  const peakRevenueShare = peakCat && agg.revenue > 0 ? safeDiv(peakCat.revenue, agg.revenue) * 100 : null;
+  const peakBookingShare = peakCat && agg.occupiedHours > 0 ? safeDiv(peakCat.occupiedHours, agg.occupiedHours) * 100 : null;
 
   // pricing consistency across this business's locations (weekday off-peak & peak)
   const locationPricing = bizVenues.map(v => {
@@ -2328,7 +2399,6 @@ function BusinessTab({ ctx }) {
   const pricingConsistent = offPeakPrices.length <= 1 && peakPrices.length <= 1;
 
   // expansion signal — cities with no location from this business, ranked by overall market occupancy there
-  const bizCities = new Set(bizVenues.map(v => v.city));
   const cityAgg = groupAndAggregate(flatRows, r => r.city, aggregate)
     .filter(c => !bizCities.has(c.key) && c.availableHours > 0)
     .sort((a, b) => b.occupancyPct - a.occupancyPct)
@@ -2342,13 +2412,67 @@ function BusinessTab({ ctx }) {
         {monthKey !== 'all' && <Select value={week} onChange={setWeek} placeholder="Whole month" options={weeks.map((w, i) => ({ value: String(i), label: `${w.label} (${w.startDay}–${w.endDay})` }))} />}
       </div>
 
+      <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--muted)', marginBottom: 8 }}>Headline numbers</div>
       <div style={styles.statGrid} className="stat-grid">
-        <StatBlock label="Locations" value={bizVenues.length} />
-        <StatBlock label="Courts" value={bizCourts.length} />
-        <StatBlock label="Occupancy" value={fmtPct(agg.occupancyPct)} accent="var(--court)" />
+        <StatBlock label="Courts" value={bizCourts.length} sub={`${bizVenues.length} location${bizVenues.length === 1 ? '' : 's'}`} />
+        <StatBlock label="Booked hours" value={agg.occupiedHours.toLocaleString()} />
+        <StatBlock label="Booked hrs / court / day" value={bookedHrsPerCourtPerDay.toFixed(1)} accent="var(--court)" />
+        <StatBlock label="Operating-Hr Occupancy" value={fmtPct(operating.operatingOccupancyPct)} />
+        <StatBlock label="24h Utilization" value={fmtPct(agg.occupancyPct)} accent="var(--court)" />
+        <StatBlock label="Prime-time occupancy" value={fmtPct(primeAgg.occupancyPct)} sub="weekdays, 5–10 PM" />
         <StatBlock label="Est. revenue" value={fmtMoney(agg.revenue)} accent="var(--ball-dark)" />
-        <StatBlock label="RevPAH" value={fmtMoney(agg.revpah)} sub="revenue / hr, 24h basis" />
-        <StatBlock label="Event hrs" value={agg.eventHours.toLocaleString()} />
+        <StatBlock label="Revenue / court" value={fmtMoney(revenuePerCourt)} />
+        <StatBlock label="RevPAH" value={fmtMoney(agg.revpah)} />
+        <StatBlock label="Booking market share" value={fmtPct(bookingShare)} sub="of everything tracked" />
+        <StatBlock label="Revenue market share" value={fmtPct(revenueShare)} />
+        <StatBlock label="Performance index" value={performanceIndex != null ? performanceIndex.toFixed(2) + '×' : '—'} accent={performanceIndex != null && performanceIndex >= 1 ? '#1F6B44' : 'var(--danger)'} sub="booking share ÷ supply share" />
+      </div>
+
+      <Card eyebrow="Busiest periods" title="When this business performs best" style={{ marginBottom: 16, marginTop: 16 }}>
+        {!busiestDow && !busiestHourOfDay ? <div style={styles.mutedNote}>No data logged for this business/period yet.</div> : (
+          <div style={styles.statGrid} className="stat-grid">
+            <StatBlock label="Busiest day" value={busiestDow ? DAY_NAMES[busiestDow.dow] : '—'} sub={busiestDow ? fmtPct(busiestDow.occupancyPct) + ' occupied' : ''} />
+            <StatBlock label="Busiest hour" value={busiestHourOfDay ? hourLabel(busiestHourOfDay.h) : '—'} sub={busiestHourOfDay ? fmtPct(busiestHourOfDay.occupancyPct) + ' occupied' : ''} />
+            <StatBlock label="Strongest 3-hr window" value={bestWindow ? `${hourLabel(bestWindow.start)}–${hourLabel(bestWindow.end)}` : '—'} sub={bestWindow ? fmtPct(bestWindow.pct) + ' occupied' : ''} />
+            <StatBlock label="Peak revenue share" value={peakRevenueShare != null ? fmtPct(peakRevenueShare) : '—'} sub={peakBookingShare != null ? `${fmtPct(peakBookingShare)} of bookings` : ''} />
+          </div>
+        )}
+      </Card>
+
+      <div style={styles.twoCol} className="two-col">
+        <Card eyebrow="Weekday vs weekend" title="Performance split">
+          <table style={styles.table}>
+            <thead><tr><th style={styles.th}>Metric</th><th style={styles.th}>Weekday</th><th style={styles.th}>Weekend</th></tr></thead>
+            <tbody>
+              <tr><td style={styles.td}>Occupancy</td><td style={styles.td}>{fmtPct(weekdayAgg.occupancyPct)}</td><td style={styles.td}>{fmtPct(weekendAgg.occupancyPct)}</td></tr>
+              <tr><td style={styles.td}>Booked hrs/court/day</td><td style={styles.td}>{weekdayPerCourtDay.toFixed(1)}</td><td style={styles.td}>{weekendPerCourtDay.toFixed(1)}</td></tr>
+              <tr><td style={styles.td}>Revenue</td><td style={{ ...styles.td, fontFamily: 'var(--font-mono)' }}>{fmtMoney(weekdayAgg.revenue)}</td><td style={{ ...styles.td, fontFamily: 'var(--font-mono)' }}>{fmtMoney(weekendAgg.revenue)}</td></tr>
+              <tr><td style={styles.td}>RevPAH</td><td style={{ ...styles.td, fontFamily: 'var(--font-mono)' }}>{fmtMoney(weekdayAgg.revpah)}</td><td style={{ ...styles.td, fontFamily: 'var(--font-mono)' }}>{fmtMoney(weekendAgg.revpah)}</td></tr>
+              <tr><td style={styles.td}>Prime occupancy</td><td style={styles.td}>{fmtPct(weekdayPrimeAgg.occupancyPct)}</td><td style={styles.td}>{fmtPct(weekendPrimeAgg.occupancyPct)}</td></tr>
+            </tbody>
+          </table>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>
+            Weekend Demand Index: <b style={{ color: 'var(--ink)' }}>{weekendDemandIndex != null ? weekendDemandIndex.toFixed(2) + '×' : '—'}</b> (weekend booked hrs/court/day ÷ weekday)
+          </div>
+        </Card>
+
+        <Card eyebrow="Price position" title="vs. the market in its own cities">
+          <div style={styles.statGrid} className="stat-grid">
+            <StatBlock label="Avg realized rate" value={fmtMoney(agg.avgRate)} />
+            <StatBlock label="Market avg (same cities)" value={fmtMoney(marketAggInCities.avgRate)} />
+            <StatBlock label="Price premium" value={pricePremium != null ? pricePremium.toFixed(2) + '×' : '—'} accent={pricePremium != null && pricePremium >= 1 ? 'var(--ball-dark)' : undefined} />
+            <StatBlock label="Occupancy vs market" value={occVsMarket != null ? occVsMarket.toFixed(2) + '×' : '—'} accent={occVsMarket != null && occVsMarket >= 1 ? '#1F6B44' : 'var(--danger)'} />
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
+            {pricePremium != null && occVsMarket != null
+              ? (pricePremium > 1 && occVsMarket >= 1
+                ? "Charges more than the local market and still occupies at or above it — genuine pricing power."
+                : pricePremium > 1 && occVsMarket < 1
+                  ? "Charges a premium but occupies below the local market — worth checking if that premium is sustainable."
+                  : "Priced at or below the local market.")
+              : 'Not enough data in this scope to compare against the local market yet.'}
+          </div>
+        </Card>
       </div>
 
       <Card eyebrow="Cross-location" title="Which location is winning" style={{ marginBottom: 16 }}>
@@ -2362,7 +2486,12 @@ function BusinessTab({ ctx }) {
               <tbody>
                 {byLocation.map(l => (
                   <tr key={l.key}>
-                    <td style={styles.td}><b>{l.key}</b></td>
+                    <td style={styles.td}>
+                      <b>{l.key}</b>
+                      {highestRevenueLoc && l.key === highestRevenueLoc.key && <Badge tone="off_peak"> Highest revenue</Badge>}
+                      {byLocation[0] && l.key === byLocation[0].key && <Badge tone="peak"> Highest occupancy</Badge>}
+                      {weakestLoc && byLocation.length > 1 && l.key === weakestLoc.key && <Badge tone="public_holiday"> Weakest</Badge>}
+                    </td>
                     <td style={styles.td}>{fmtPct(l.occupancyPct)}</td>
                     <td style={styles.td}>{l.occupiedHours.toLocaleString()}</td>
                     <td style={{ ...styles.td, fontFamily: 'var(--font-mono)' }}>{fmtMoney(l.revenue)}</td>
